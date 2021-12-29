@@ -1,1 +1,1 @@
-# Capacitor Sqlite Cloud Sync
+# TypeOrm Cloud Sync
