@@ -68,7 +68,9 @@ export abstract class CloudStore {
 
   protected async initialize() {
     this.subscribeNetwork();
+    this.downloadingSubject.next(true);
     await this.subscribePublicCloud();
+    this.downloadingSubject.next(false);
     this.subscribeLocalUser(); // Handles private cloud subscription
   }
 
@@ -79,11 +81,6 @@ export abstract class CloudStore {
       fromEvent(window, 'offline').pipe(mapTo(false)),
     );
     networkObservable.subscribe(this.networkSubject);
-    networkObservable.subscribe((status) => {
-      // TODO: this may be OK if we guarantee that setting up subscriptions will eventually clear downloading
-      this.downloadingSubject.next(status);
-    });
-
     this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
   }
 
@@ -93,6 +90,7 @@ export abstract class CloudStore {
       // This may mess with sign out logic... need to think...
       if (this.lastUser?.authId !== user?.authId) {
         if (user?.authId) {
+          this.downloadingSubject.next(true);
           await this.subscribePrivateCloud();
           this.downloadingSubject.next(false);
         } else {
