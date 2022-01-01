@@ -18,8 +18,8 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   constructor(readonly sqliteStore: SqliteStore,
               protected UserModel: typeof BaseUser,
-              protected publicRecords: StoreRecord[],
-              protected privateRecords: StoreRecord[],
+              protected publicRecords: (typeof StoreRecord)[],
+              protected privateRecords: (typeof StoreRecord)[],
               app: FirebaseApp) {
     super(sqliteStore, UserModel, publicRecords, privateRecords);
     this.db = getFirestore(app);

@@ -8,4 +8,4 @@ export {CloudFirebaseFirestore} from "./cloud/firebase/cloud-firebase-firestore"
 export {CloudStore} from "./cloud/cloud-store";
 
 export {StoreChangeLogSubscriber} from "./store-change-log.subscriber"
-export {UserSubscriber} from "./user.subscriber"
+export {BaseUserSubscriber} from "./base-user.subscriber"

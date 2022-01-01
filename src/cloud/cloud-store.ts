@@ -47,7 +47,7 @@ export abstract class CloudStore {
 
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
-  public get downloading(): Observable<boolean> { return this.downloadingSubject.asObservable() }
+  public get downloading(): boolean { return this.downloadingSubject.getValue() }
 
   readonly privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
@@ -55,13 +55,13 @@ export abstract class CloudStore {
 
   protected constructor(readonly localStore: SqliteStore,
                         protected UserModel: typeof BaseUser,
-                        protected publicRecords: StoreRecord[],
-                        protected privateRecords: StoreRecord[]) {}
+                        protected publicRecords: (typeof StoreRecord)[],
+                        protected privateRecords: (typeof StoreRecord)[]) {}
 
   protected async initialize() {
     this.subscribeNetwork();
     await this.subscribePublicCloud();
-    await this.subscribeLocalUser(); // Handles private cloud subscription
+    this.subscribeLocalUser(); // Handles private cloud subscription
   }
 
   private subscribeNetwork() {
@@ -86,6 +86,7 @@ export abstract class CloudStore {
       if (this.lastUser?.authId !== user?.authId) {
         if(user?.authId) {
           await this.subscribePrivateCloud();
+          this.downloadingSubject.next(false);
         } else {
           this.unsubscribePrivateCloud();
         }

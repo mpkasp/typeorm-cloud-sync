@@ -1,8 +1,9 @@
-import {Connection, EntitySubscriberInterface, InsertEvent, RemoveEvent, UpdateEvent} from 'typeorm';
+import { Connection, EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, UpdateEvent } from 'typeorm';
 import {BaseUser} from './models/base-user.model';
 import { CloudStore } from './cloud/cloud-store';
 
-export class UserSubscriber implements EntitySubscriberInterface<BaseUser> {
+@EventSubscriber()
+export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
   constructor(public UserModel: typeof BaseUser, public cloudStore: CloudStore) {}
 
   listenTo() {

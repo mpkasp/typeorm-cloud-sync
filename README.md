@@ -25,9 +25,11 @@ this.cloudStore = new CloudFirebaseFirestore(
 If setting up private cloud, you must add a subscriber to typeorm's subscribers after the connection is created such that we can inject some objects:
 
 ```typescript
-import { UserSubscriber } from '@typeorm-cloud-sync/user.subscriber';
+import { BaseUserSubscriber } from 'typeorm-cloud-sync';
+import { StoreChangeLogSubscriber } from 'typeorm-cloud-sync';
 
 ...
 
+connection.subscribers.push(new StoreChangeLogSubscriber(this.cloudStore));
 connection.subscribers.push(new UserSubscriber(this.cloudStore));
 ```
