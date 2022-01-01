@@ -24,7 +24,7 @@ export class StoreChangeLog extends BaseEntity {
     }
 
     public static newFromRecord(storeRecord: StoreRecord) {
-        return new StoreChangeLog(storeRecord.constructor.name, storeRecord.id);
+        return new StoreChangeLog(storeRecord.constructor.name, storeRecord.id!);
     }
 
     public static getFromRecord(storeRecord: StoreRecord): Promise<StoreChangeLog[]> {
