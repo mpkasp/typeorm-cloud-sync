@@ -1,23 +1,24 @@
-import {SqliteStoreService} from './sqlite-store.service';
-import {StoreRecord} from './models/store-record.model';
-import {StoreChangeLog} from './models/store-change-log.model';
+// tslint:disable: no-console
+import {SqliteStore} from '../sqlite-store';
+import {StoreRecord} from '../models/store-record.model';
+import {StoreChangeLog} from '../models/store-change-log.model';
 
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
+import { CloudSubject } from './cloud-subject';
+import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 
-export abstract class CloudService {
-  protected authenticatedSubject: BehaviorSubject<any> = new BehaviorSubject<any>(null);
+export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
+  public network$: Observable<boolean> = this.networkSubject.asObservable();
+  public get network(): boolean { return this.networkSubject.getValue() }
   protected cloudDownloading: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
-
   protected localSubjects: CloudSubject<any>[] = [];
   protected cloudSubscriptions: Subscription[] = [];
+  private changeLogSubscriber = new StoreChangeLogSubscriber(this);
 
-  protected constructor(public localStore: SqliteStoreService) {}
+  protected constructor(readonly localStore: SqliteStore) {}
 
   protected abstract setupCloudSubscriptions(): Promise<any>;
-
-  protected listenForLocalChanges() {
-  }
 
   protected unsubscribeCloudSubscriptions() {
     this.cloudSubscriptions.forEach(subscription => subscription.unsubscribe());
@@ -49,55 +50,35 @@ export abstract class CloudService {
         this.localSubjects.forEach(s => s.initialized = false);
       }
     });
-    // Network.addListener('networkStatusChange', status => {
-    //   console.log('[subscribeNetwork] Network status changed', status);
-    //   this.networkSubject.next(status.connected);
-    //   if (status.connected) {
-    //     this.setupCloudSubscriptions();
-    //   } else {
-    //     this.unsubscribeCloudSubscriptions();
-    //     this.localSubjects.forEach(s => s.initialized = false);
-    //   }
-    // });
 
     this.downloading.subscribe(async d => await this.updateCloudFromChangeLog());
-
-    // console.log('[subscribeNetwork] initial status: ', status);
-    // this.networkSubject.next((await Network.getStatus()).connected);
-  }
-
-  public get network(): Observable<boolean> {
-    return this.networkSubject.asObservable();
   }
 
   public get downloading(): Observable<boolean> {
     return this.cloudDownloading.asObservable();
   }
 
-  public get authenticated() {
-    return this.authenticatedSubject.asObservable();
-  }
-
+  // Create an object in the cloud from a local StoreRecord
   public abstract create(obj: StoreRecord): Promise<any>;
 
+  // Update an object in the cloud from a local StoreRecord
   public abstract update(obj: StoreRecord): Promise<any>;
 
-  // Update in a transaction which bumps the changeId, etc...
+  // Logic of updating a StoreRecord in a transaction: bumps the changeId, sets record change timestamp, updates
+  // metadata table etc...
   public abstract updateStoreRecord(obj: StoreRecord): Promise<any>;
 
+  // Delete an object in the cloud
   public abstract delete(obj: StoreRecord, fromDb: boolean): Promise<any>;
 
-  protected abstract deserialize(document): any;
+  // Deserialize object from the cloud into local object in dictionary format
+  protected abstract deserialize(document: any): any;
 
+  // Update the cloud with any local changes stored in the change log
   public async updateCloudFromChangeLog() {
 
     if (!this.networkSubject.getValue()) {
       console.warn('[updateCloudFromChangeLog] No network, not updating cloud.');
-      return;
-    }
-
-    if (!this.authenticatedSubject.getValue()) {
-      console.warn('[updateCloudFromChangeLog] Not authenticated, not updating cloud.');
       return;
     }
 
@@ -124,7 +105,8 @@ export abstract class CloudService {
     }
   }
 
-  protected async resolveRecords(recordType, objs) {
+  // Resolve a list of records
+  protected async resolveRecords(recordType: typeof StoreRecord, objs: StoreRecord[]) {
     const resolvedRecords = [];
     for (const obj of objs) {
       // Only need to resolve issues if there's also a local change pending...
@@ -134,7 +116,8 @@ export abstract class CloudService {
     return resolvedRecords;
   }
 
-  protected async resolveRecord(recordType, obj) {
+  // Helper to call proper resolve function when a new object is received from the cloud
+  protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
     // TODO: How to handle user?
     const localChange = await StoreChangeLog.findOne({where: {recordId: obj.id}});
     if (localChange) {
@@ -145,14 +128,5 @@ export abstract class CloudService {
       console.log('[resolveRecords] No local change, resolving from cloud.');
       return await this.localStore.resolve(obj);
     }
-  }
-}
-
-export class CloudSubject<T> extends BehaviorSubject<T> {
-  initialized: boolean = false;
-
-  unsubscribe(): void {
-    this.initialized = false;
-    super.unsubscribe();
   }
 }

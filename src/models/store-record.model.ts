@@ -19,10 +19,13 @@ export abstract class StoreRecord extends BaseEntity {
   changeId: number = 1;
 
   @Column()
-  protected createdMs: number;
+  protected createdMs?: number;
 
   @Column()
-  protected updatedMs: number;
+  protected updatedMs?: number;
+
+  @Column()
+  isPublic = false;
 
   protected constructor(init?: Partial<any>) {
     super();
@@ -73,8 +76,10 @@ export abstract class StoreRecord extends BaseEntity {
     if (!includeId) {
       delete clone.id;
     }
-    Object.keys(clone).forEach(key => {
+    Object.keys(clone).forEach((key: string) => {
+      // @ts-ignore
       if (clone[key] === undefined) {
+        // @ts-ignore
         delete clone[key];
         // console.log('deleted ', key);
       }
@@ -83,12 +88,13 @@ export abstract class StoreRecord extends BaseEntity {
     return clone;
   }
 
-  describe(): Array<string> {
+  describe(): string[] {
     return Object.getOwnPropertyNames(this);
   }
 
-  properties(): Array<string> {
+  properties(): string[] {
     const props = Object.getOwnPropertyNames(this).sort();
+    // @ts-ignore
     props.filter(prop => typeof props[prop] !== 'function');
     return props;
   }
@@ -106,14 +112,14 @@ export abstract class StoreRecord extends BaseEntity {
     // console.log(existingChangeLog);
     if (!existingChangeLog) {
       // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${this.constructor.name}, ${this.id}`);
-      return await new StoreChangeLog(this.constructor.name, this.id).save();
+      return await new StoreChangeLog(this.constructor.name, this.id!).save();
     } else {
       // console.log(`[updateChangeLog] change log exists, skipping making a new one ${this.constructor.name}, ${this.id}`);
     }
     return existingChangeLog;
   }
 
-  async updateSubscriptions() {}
+  abstract updateSubscriptions(): Promise<any>;
 
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
     // console.log(this, updateChangeLog, options);
