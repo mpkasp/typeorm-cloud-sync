@@ -5,7 +5,7 @@ import {StoreChangeLog} from '../models/store-change-log.model';
 
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
-import { User } from '../models/user.model';
+import { BaseUser } from '../models/base-user.model';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -41,9 +41,9 @@ export abstract class CloudStore {
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean { return this.networkSubject.getValue() }
 
-  public userSubject: BehaviorSubject<User | null> = new BehaviorSubject<User | null>(null);
-  public user$: Observable<User | null> = this.userSubject.asObservable();
-  public get user(): User | null { return this.userSubject.getValue() }
+  public userSubject: BehaviorSubject<BaseUser | null> = new BehaviorSubject<BaseUser | null>(null);
+  public user$: Observable<BaseUser | null> = this.userSubject.asObservable();
+  public get user(): BaseUser | null { return this.userSubject.getValue() }
 
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
@@ -51,10 +51,10 @@ export abstract class CloudStore {
 
   readonly privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
-  private lastUser: User | null = this.user;
+  private lastUser: BaseUser | null = this.user;
 
   protected constructor(readonly localStore: SqliteStore,
-                        protected UserModel: typeof User,
+                        protected UserModel: typeof BaseUser,
                         protected publicRecords: StoreRecord[],
                         protected privateRecords: StoreRecord[]) {}
 

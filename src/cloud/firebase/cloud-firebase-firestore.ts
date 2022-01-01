@@ -2,7 +2,7 @@
 import { CloudStore } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
-import { User } from '../../models/user.model';
+import { BaseUser } from '../../models/base-user.model';
 
 import { v4 as uuid } from 'uuid';
 
@@ -17,7 +17,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   private firestoreUnsubscribes: Unsubscribe[] = [];
 
   constructor(readonly sqliteStore: SqliteStore,
-              protected UserModel: typeof User,
+              protected UserModel: typeof BaseUser,
               protected publicRecords: StoreRecord[],
               protected privateRecords: StoreRecord[],
               app: FirebaseApp) {

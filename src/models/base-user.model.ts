@@ -2,7 +2,7 @@ import {StoreRecord} from './store-record.model';
 import {Column, Entity} from 'typeorm';
 
 @Entity({name: 'user'})
-export class User extends StoreRecord {
+export class BaseUser extends StoreRecord {
   @Column({nullable: true})
   public authId?: string | null = null;
 

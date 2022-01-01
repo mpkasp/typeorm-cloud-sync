@@ -3,12 +3,12 @@ import {StoreRecord} from './models/store-record.model';
 import {StoreChangeLog} from './models/store-change-log.model';
 
 import {Connection} from 'typeorm';
-import { User } from './models/user.model';
+import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
   readonly connection: Connection;
 
-  constructor(connection: Connection, public UserModel: typeof User) {
+  constructor(connection: Connection, public UserModel: typeof BaseUser) {
     this.connection = connection;
   }
 

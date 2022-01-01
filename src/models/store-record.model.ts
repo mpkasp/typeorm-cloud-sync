@@ -119,8 +119,6 @@ export abstract class StoreRecord extends BaseEntity {
     return existingChangeLog;
   }
 
-  abstract updateSubscriptions(): Promise<any>;
-
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
     // console.log(this, updateChangeLog, options);
     const savedRecord = await super.save(options);
@@ -129,7 +127,6 @@ export abstract class StoreRecord extends BaseEntity {
       // Removed await from update change log - this speeds things up in the ui nicely, but it may affect function. Be aware!
       this.updateChangeLog();
     }
-    this.updateSubscriptions();
     return savedRecord;
   }
 }
