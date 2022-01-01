@@ -8,19 +8,36 @@ import { v4 as uuid } from 'uuid';
 
 import { FirebaseApp } from '@firebase/app';
 import {
-  collection, doc, addDoc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, getFirestore,
-  Firestore, query, where, limit, orderBy, runTransaction, CollectionReference, Unsubscribe,
+  collection,
+  doc,
+  addDoc,
+  setDoc,
+  getDoc,
+  getDocs,
+  deleteDoc,
+  onSnapshot,
+  getFirestore,
+  Firestore,
+  query,
+  where,
+  limit,
+  orderBy,
+  runTransaction,
+  CollectionReference,
+  Unsubscribe,
 } from '@firebase/firestore';
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
   private firestoreUnsubscribes: Unsubscribe[] = [];
 
-  constructor(readonly sqliteStore: SqliteStore,
-              protected UserModel: typeof BaseUser,
-              protected publicRecords: (typeof StoreRecord)[],
-              protected privateRecords: (typeof StoreRecord)[],
-              app: FirebaseApp) {
+  constructor(
+    readonly sqliteStore: SqliteStore,
+    protected UserModel: typeof BaseUser,
+    protected publicRecords: typeof StoreRecord[],
+    protected privateRecords: typeof StoreRecord[],
+    app: FirebaseApp,
+  ) {
     super(sqliteStore, UserModel, publicRecords, privateRecords);
     this.db = getFirestore(app);
     this.initialize();
@@ -77,59 +94,75 @@ export class CloudFirebaseFirestore extends CloudStore {
       const document = await getDoc(userDocRef);
       // console.log('[updateStoreRecord] User', document.exists);
       if (!document.exists()) {
-        console.log('[firestore-model] Update: document doesn\'t exist for this user, ', document);
+        console.log("[firestore-model] Update: document doesn't exist for this user, ", document);
         return await setDoc(userDocRef, obj.raw());
         // throw new Error('Document doesn\'t exist for this user');
       }
       // console.log('[updateStoreRecord] about to run transaction');
-      return runTransaction(this.db, transaction => transaction.get(userDocRef).then(userDoc => {
-        console.log('[updateStoreRecord, firestore-model] updating user', document.data(), userDoc, userDoc.data(), obj);
-        let changeId = 0;
-        if (userDoc.exists()) {
-          changeId = userDoc.data().changeId + 1;
-          obj.changeId = changeId;
-          // const doc = db.doc(this.userDocument());
-          // set vs update: The set call on the other hand, will create or update the document as needed.
-          transaction.set(userDocRef, obj.raw(), { merge: true });
-        } else {
-          throw Error('Document does not exist!');
-        }
-        return obj;
-      })).then(val => {
-        // console.log(val);
-      }).catch(err => {
-        console.warn(err);
-      });
+      return runTransaction(this.db, (transaction) =>
+        transaction.get(userDocRef).then((userDoc) => {
+          console.log(
+            '[updateStoreRecord, firestore-model] updating user',
+            document.data(),
+            userDoc,
+            userDoc.data(),
+            obj,
+          );
+          let changeId = 0;
+          if (userDoc.exists()) {
+            changeId = userDoc.data().changeId + 1;
+            obj.changeId = changeId;
+            // const doc = db.doc(this.userDocument());
+            // set vs update: The set call on the other hand, will create or update the document as needed.
+            transaction.set(userDocRef, obj.raw(), { merge: true });
+          } else {
+            throw Error('Document does not exist!');
+          }
+          return obj;
+        }),
+      )
+        .then((val) => {
+          // console.log(val);
+        })
+        .catch((err) => {
+          console.warn(err);
+        });
     }
   }
 
   public updatePublicStoreRecord(model: any, metaDocRef: any, collectionRef: CollectionReference): Promise<any> {
     console.log('[updatePublicStoreRecord]', model);
-    return runTransaction(this.db, transaction => transaction.get(metaDocRef).then(metaDoc => {
-      let changeId = 0;
-      if (metaDoc.exists()) {
-        console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data());
-        // @ts-ignore
-        changeId = metaDoc.data().changeId + 1;
-        model.changeId = changeId;
-        model.recordChangeTimestamp = new Date();
-        console.log('[updatePublicStoreRecord] collectionRef.path: ', collectionRef.path);
-        const docRef = doc(this.db, collectionRef.path + '/' + model.id);
-        // const docRef = collectionRef.doc(model.id);
-        console.log('[updatePublicStoreRecord]', model, model.raw());
-        // Need merge = true if we want to allow migrations since it uses the uid property
-        transaction.set(docRef, model.raw(), { merge: true });
-        transaction.update(metaDoc.ref, { changeId });
-      } else {
-        throw Error('Document does not exist!');
-      }
-      return model;
-    })).then(val => {
-      console.log('[updatePublicStoreRecord]', val);
-    }).catch(err => {
-      console.error(err);
-      console.warn('Make sure the collection is created. Our rules don\'t allow creation of collections, even for admins!');
-    });
+    return runTransaction(this.db, (transaction) =>
+      transaction.get(metaDocRef).then((metaDoc) => {
+        let changeId = 0;
+        if (metaDoc.exists()) {
+          console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data());
+          // @ts-ignore
+          changeId = metaDoc.data().changeId + 1;
+          model.changeId = changeId;
+          model.recordChangeTimestamp = new Date();
+          console.log('[updatePublicStoreRecord] collectionRef.path: ', collectionRef.path);
+          const docRef = doc(this.db, collectionRef.path + '/' + model.id);
+          // const docRef = collectionRef.doc(model.id);
+          console.log('[updatePublicStoreRecord]', model, model.raw());
+          // Need merge = true if we want to allow migrations since it uses the uid property
+          transaction.set(docRef, model.raw(), { merge: true });
+          transaction.update(metaDoc.ref, { changeId });
+        } else {
+          throw Error('Document does not exist!');
+        }
+        return model;
+      }),
+    )
+      .then((val) => {
+        console.log('[updatePublicStoreRecord]', val);
+      })
+      .catch((err) => {
+        console.error(err);
+        console.warn(
+          "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
+        );
+      });
   }
 
   public async delete(obj: any, fromDb: boolean = false) {
@@ -179,7 +212,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected unsubscribePrivateCloud() {
-    this.firestoreUnsubscribes.forEach(unsubscribe => unsubscribe());
+    this.firestoreUnsubscribes.forEach((unsubscribe) => unsubscribe());
     this.firestoreUnsubscribes = [];
   }
 
@@ -196,7 +229,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       const unsubscribe = onSnapshot(q, async (snapshot) => {
         latestChangeId = await obj.getLatestChangeId();
         const records: StoreRecord[] = [];
-        snapshot.docs.forEach(docRef => {
+        snapshot.docs.forEach((docRef) => {
           const d = docRef.data();
           if (d.changeId > latestChangeId) {
             records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));

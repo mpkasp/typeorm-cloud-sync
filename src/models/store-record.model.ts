@@ -2,17 +2,18 @@ import {
   BaseEntity,
   BeforeInsert,
   BeforeUpdate,
-  Column, ObjectType,
+  Column,
+  ObjectType,
   PrimaryGeneratedColumn,
-  SaveOptions
+  SaveOptions,
 } from 'typeorm';
-import {StoreChangeLog} from './store-change-log.model';
+import { StoreChangeLog } from './store-change-log.model';
 
 export abstract class StoreRecord extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id?: string;
 
-  @Column({type: 'boolean'})
+  @Column({ type: 'boolean' })
   isDeleted: boolean = false;
 
   @Column()
@@ -95,7 +96,7 @@ export abstract class StoreRecord extends BaseEntity {
   properties(): string[] {
     const props = Object.getOwnPropertyNames(this).sort();
     // @ts-ignore
-    props.filter(prop => typeof props[prop] !== 'function');
+    props.filter((prop) => typeof props[prop] !== 'function');
     return props;
   }
 
@@ -108,7 +109,9 @@ export abstract class StoreRecord extends BaseEntity {
   }
 
   async updateChangeLog(): Promise<StoreChangeLog> {
-    const existingChangeLog = await StoreChangeLog.findOne({where: {tableName: this.constructor.name, recordId: this.id}});
+    const existingChangeLog = await StoreChangeLog.findOne({
+      where: { tableName: this.constructor.name, recordId: this.id },
+    });
     // console.log(existingChangeLog);
     if (!existingChangeLog) {
       // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${this.constructor.name}, ${this.id}`);

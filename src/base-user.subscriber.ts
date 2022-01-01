@@ -1,5 +1,5 @@
 import { Connection, EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, UpdateEvent } from 'typeorm';
-import {BaseUser} from './models/base-user.model';
+import { BaseUser } from './models/base-user.model';
 import { CloudStore } from './cloud/cloud-store';
 
 @EventSubscriber()

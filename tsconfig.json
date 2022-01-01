@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
+    "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "ES5",
+    "target": "es5",
     "module": "CommonJS",
+    "moduleResolution": "node",
     "declaration": true,
     "outDir": "./lib",
     "strict": true,
-    "lib": [
-      "es2018",
-      "dom"
-    ]
+    "lib": ["es5", "es6", "dom"],
+
   },
   "include": ["src"],
   "exclude": ["node_modules", "**/__tests__/*"]

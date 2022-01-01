@@ -1,24 +1,24 @@
-import {StoreRecord} from './store-record.model';
-import {Column, Entity} from 'typeorm';
+import { StoreRecord } from './store-record.model';
+import { Column, Entity } from 'typeorm';
 
-@Entity({name: 'user'})
+@Entity({ name: 'user' })
 export class BaseUser extends StoreRecord {
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public authId?: string | null = null;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public email?: string;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public displayName?: string;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public photoURL?: string;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public firstName?: string;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   public lastName?: string;
 
   constructor(init?: Partial<any>) {

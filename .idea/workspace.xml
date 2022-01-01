@@ -3,11 +3,16 @@
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/base-user.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/base-user.subscriber.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/user.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/base-user.subscriber.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/base-user.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/base-user.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/store-change-log.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-change-log.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/store-record.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-record.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sqlite-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/sqlite-store.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tsconfig.json" beforeDir="false" afterPath="$PROJECT_DIR$/tsconfig.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -53,6 +58,45 @@
       <recent name="$PROJECT_DIR$/src/cloud" />
     </key>
   </component>
+  <component name="RunManager" selected="npm.prepare">
+    <configuration name="format" type="js.build_tools.npm" temporary="true" nameIsGenerated="true">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="format" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <configuration name="lint" type="js.build_tools.npm" temporary="true" nameIsGenerated="true">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="lint" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <configuration name="prepare" type="js.build_tools.npm" temporary="true" nameIsGenerated="true">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="prepare" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="npm.prepare" />
+        <item itemvalue="npm.lint" />
+        <item itemvalue="npm.format" />
+      </list>
+    </recent_temporary>
+  </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
@@ -61,7 +105,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1640646481489</updated>
-      <workItem from="1640646483547" duration="40473000" />
+      <workItem from="1640646483547" duration="40923000" />
     </task>
     <servers />
   </component>

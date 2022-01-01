@@ -1,7 +1,7 @@
 // tslint:disable: no-console
-import {SqliteStore} from '../sqlite-store';
-import {StoreRecord} from '../models/store-record.model';
-import {StoreChangeLog} from '../models/store-change-log.model';
+import { SqliteStore } from '../sqlite-store';
+import { StoreRecord } from '../models/store-record.model';
+import { StoreChangeLog } from '../models/store-change-log.model';
 
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
@@ -39,24 +39,32 @@ import { BaseUser } from '../models/base-user.model';
 export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
   public network$: Observable<boolean> = this.networkSubject.asObservable();
-  public get network(): boolean { return this.networkSubject.getValue() }
+  public get network(): boolean {
+    return this.networkSubject.getValue();
+  }
 
   public userSubject: BehaviorSubject<BaseUser | null> = new BehaviorSubject<BaseUser | null>(null);
   public user$: Observable<BaseUser | null> = this.userSubject.asObservable();
-  public get user(): BaseUser | null { return this.userSubject.getValue() }
+  public get user(): BaseUser | null {
+    return this.userSubject.getValue();
+  }
 
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
-  public get downloading(): boolean { return this.downloadingSubject.getValue() }
+  public get downloading(): boolean {
+    return this.downloadingSubject.getValue();
+  }
 
   readonly privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = this.user;
 
-  protected constructor(readonly localStore: SqliteStore,
-                        protected UserModel: typeof BaseUser,
-                        protected publicRecords: (typeof StoreRecord)[],
-                        protected privateRecords: (typeof StoreRecord)[]) {}
+  protected constructor(
+    readonly localStore: SqliteStore,
+    protected UserModel: typeof BaseUser,
+    protected publicRecords: typeof StoreRecord[],
+    protected privateRecords: typeof StoreRecord[],
+  ) {}
 
   protected async initialize() {
     this.subscribeNetwork();
@@ -68,23 +76,23 @@ export abstract class CloudStore {
     const networkObservable = merge(
       of(navigator.onLine),
       fromEvent(window, 'online').pipe(mapTo(true)),
-      fromEvent(window, 'offline').pipe(mapTo(false))
+      fromEvent(window, 'offline').pipe(mapTo(false)),
     );
     networkObservable.subscribe(this.networkSubject);
-    networkObservable.subscribe(status => {
+    networkObservable.subscribe((status) => {
       // TODO: this may be OK if we guarantee that setting up subscriptions will eventually clear downloading
       this.downloadingSubject.next(status);
     });
 
-    this.downloading$.subscribe(async d => await this.updateCloudFromChangeLog());
+    this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
   }
 
   private subscribeLocalUser() {
-    this.user$.subscribe(async(user) => {
+    this.user$.subscribe(async (user) => {
       // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
       // This may mess with sign out logic... need to think...
       if (this.lastUser?.authId !== user?.authId) {
-        if(user?.authId) {
+        if (user?.authId) {
           await this.subscribePrivateCloud();
           this.downloadingSubject.next(false);
         } else {
@@ -120,7 +128,7 @@ export abstract class CloudStore {
   //  Set up cloud subscriptions
   // *
   protected abstract subscribePublicCloud(): any;
-  
+
   protected abstract subscribePrivateCloud(): any;
 
   protected abstract unsubscribePrivateCloud(): any;
@@ -179,7 +187,7 @@ export abstract class CloudStore {
 
   // Helper to call proper resolve function when a new object is received from the cloud
   protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
-    const localChange = await StoreChangeLog.findOne({where: {recordId: obj.id}});
+    const localChange = await StoreChangeLog.findOne({ where: { recordId: obj.id } });
     if (localChange) {
       console.log('[resolveRecords] Local change, need to resolve!');
       const localCopy = await recordType.findOne(obj.id);

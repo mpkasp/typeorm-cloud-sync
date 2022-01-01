@@ -1,8 +1,8 @@
 // tslint:disable: no-console
-import {StoreRecord} from './models/store-record.model';
-import {StoreChangeLog} from './models/store-change-log.model';
+import { StoreRecord } from './models/store-record.model';
+import { StoreChangeLog } from './models/store-change-log.model';
 
-import {Connection} from 'typeorm';
+import { Connection } from 'typeorm';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
@@ -28,7 +28,11 @@ export class SqliteStore {
       // console.log(localTime, cloudTime);
       if (cloudTime >= localTime) {
         // server record is newer - use the server record
-        console.log('[CloudSync - SqliteStore - resolve] server record is newer - use the server record', localRecord, cloudRecord);
+        console.log(
+          '[CloudSync - SqliteStore - resolve] server record is newer - use the server record',
+          localRecord,
+          cloudRecord,
+        );
         try {
           const record = await this.saveRecord(cloudRecord, false);
           const changeLogs = await StoreChangeLog.getFromRecord(localRecord);
@@ -40,7 +44,11 @@ export class SqliteStore {
         }
       } else {
         // local record is newer - use the local record
-        console.log('[CloudSync - SqliteStore - resolve] local record is newer - use the local record', localRecord, cloudRecord);
+        console.log(
+          '[CloudSync - SqliteStore - resolve] local record is newer - use the local record',
+          localRecord,
+          cloudRecord,
+        );
         await localRecord.updateChangeLog();
         return Promise.resolve(localRecord);
       }
@@ -50,6 +58,6 @@ export class SqliteStore {
   }
 
   public async saveRecord(record: StoreRecord, updateChangeLog: boolean = true): Promise<StoreRecord> {
-    return await record.save({}, updateChangeLog);;
+    return await record.save({}, updateChangeLog);
   }
 }
