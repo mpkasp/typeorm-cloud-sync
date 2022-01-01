@@ -1,40 +1,40 @@
 // tslint:disable: no-console
 import { CloudStore } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
-import { CloudSubject } from '../cloud-subject';
+import { StoreRecord } from '../../models/store-record.model';
+import { User } from '../../models/user.model';
 
 import { v4 as uuid } from 'uuid';
-import { first, take } from 'rxjs/operators';
 
 import { FirebaseApp } from '@firebase/app';
-import { Auth, onAuthStateChanged } from '@firebase/auth';
 import {
   collection, doc, addDoc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, getFirestore,
   Firestore, query, where, limit, orderBy, runTransaction, CollectionReference, Unsubscribe,
 } from '@firebase/firestore';
-import { StoreRecord } from '../../models/store-record.model';
-import { User } from '../../models/user.model';
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
-  firestoreUnsubscribes: Unsubscribe[] = [];
-  localUser: User | null = await User.findOne();
+  private firestoreUnsubscribes: Unsubscribe[] = [];
 
-  private authenticated: boolean = false;
-
-  constructor(readonly sqliteStore: SqliteStore, app: FirebaseApp, public UserModel: typeof User) {
-    super(sqliteStore);
+  constructor(readonly sqliteStore: SqliteStore,
+              protected UserModel: typeof User,
+              protected publicRecords: StoreRecord[],
+              protected privateRecords: StoreRecord[],
+              app: FirebaseApp) {
+    super(sqliteStore, UserModel, publicRecords, privateRecords);
     this.db = getFirestore(app);
-    this.subscribeNetwork();
+    this.initialize();
   }
 
+  // Implement CloudStore
+
   public async create(obj: any) {
-    const collectionPath = this.collectionPath(obj);
+    const collectionPath = this.collectionPath(obj, true);
     return addDoc(collection(this.db, collectionPath), obj.raw());
   }
 
   public async update(obj: any) {
-    const documentPath = this.documentPath(obj);
+    const documentPath = this.documentPath(obj, true);
     const docRef = doc(this.db, documentPath);
     return setDoc(docRef, obj.raw(), { merge: true });
   }
@@ -42,7 +42,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   public async updateStoreRecord(obj: any) {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
-    const collectionPath = this.collectionPath(obj);
+    const collectionPath = this.collectionPath(obj, true);
     const baseCollection = collection(this.db, collectionPath);
     const baseDocument = doc(this.db, this.userDocument());
     // console.log('[updateStoreRecord]', modelName, baseDocument);
@@ -134,7 +134,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   public async delete(obj: any, fromDb: boolean = false) {
     if (fromDb) {
-      const documentPath = this.documentPath(obj);
+      const documentPath = this.documentPath(obj, true);
       const documentRef = doc(this.db, documentPath);
       return deleteDoc(documentRef);
     }
@@ -142,50 +142,10 @@ export class CloudFirebaseFirestore extends CloudStore {
     return this.updateStoreRecord(obj);
   }
 
-  protected async subscribeObj(obj: any, subject: CloudSubject<any>): Promise<void> {
-    let latestChangeId = await obj.getLatestChangeId();
-    // console.log(`Latest ${obj.name} ChangeId: ${latestChangeId}`);
-
-    const collectionPath = this.collectionPath(new obj());
-    return new Promise<void>((resolve) => {
-      const collectionRef = collection(this.db, collectionPath);
-      const q = query(collectionRef, where('changeId', '>', latestChangeId));
-      const unsubscribe = onSnapshot(q, async (snapshot) => {
-        latestChangeId = await obj.getLatestChangeId();
-        const records: StoreRecord[] = [];
-        snapshot.docs.forEach(docRef => {
-          const d = docRef.data();
-          if (d.changeId > latestChangeId) {
-            records.push(new obj(this.deserialize(d, docRef.id)));
-          }
-        });
-        // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
-        const resolvedRecords = await this.resolveRecords(obj, records);
-        if (resolvedRecords) {
-          subject.next(resolvedRecords);
-        }
-        if (!subject.initialized) {
-          resolve();
-          subject.initialized = true;
-          this.cloudDownloading.next(!this.subscriptionsInitialized());
-        }
-      });
-
-      this.firestoreUnsubscribes.push(unsubscribe);
-    });
-  }
-
-  protected unsubscribeCloudSubscriptions() {
-    this.cloudSubscriptions.forEach(subscription => subscription.unsubscribe());
-    this.cloudSubscriptions = [];
-  }
-
-  protected deserialize(data: any, id?: string): any {
-    // console.log('[deserialize]: ', data, id);
-    if (data.hasOwnProperty('created')) {
-      // @ts-ignore
-      delete data.created;
-    }
+  protected deserialize(data: any, id?: string, isPrivate: boolean = true): any {
+    // if (data.hasOwnProperty('created')) {
+    //   delete data.created;
+    // }
     for (const key in data) {
       if (data.hasOwnProperty(key) && data[key] && typeof data[key].toDate === 'function') {
         data[key] = data[key].toDate();
@@ -198,68 +158,103 @@ export class CloudFirebaseFirestore extends CloudStore {
     if (id) {
       data.id = id;
     }
-    // console.log('[deserialize]: ', data);
+    data.isPrivate = isPrivate;
+    console.log('[CloudFirebaseFirestore - deserialize]: ', data, id);
     return data;
   }
 
-  private collectionPath(obj: any): string {
-    if (obj.isPublic) {
+  protected async subscribePublicCloud() {
+    return this.publicRecords.forEach(async (PublicRecord) => {
+      await this.subscribeObj(PublicRecord, false);
+    }, Error());
+  }
+
+  protected async subscribePrivateCloud() {
+    // TODO: await cloud user??
+    await this.subscribeCloudUser();
+    return this.privateRecords.forEach(async (PrivateRecord) => {
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to: ', PrivateRecord);
+      await this.subscribeObj(PrivateRecord, true);
+    }, Error());
+  }
+
+  protected unsubscribePrivateCloud() {
+    this.firestoreUnsubscribes.forEach(unsubscribe => unsubscribe());
+    this.firestoreUnsubscribes = [];
+  }
+
+  // Done implementing CloudStore, now helper functions:
+
+  protected async subscribeObj(obj: any, isPrivate: boolean = true) {
+    let latestChangeId = await obj.getLatestChangeId();
+    const collectionPath = this.collectionPath(new obj(), isPrivate);
+
+    return new Promise<void>((resolve) => {
+      const collectionRef = collection(this.db, collectionPath);
+      const q = query(collectionRef, where('changeId', '>', latestChangeId));
+      let unresolved = true;
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
+        latestChangeId = await obj.getLatestChangeId();
+        const records: StoreRecord[] = [];
+        snapshot.docs.forEach(docRef => {
+          const d = docRef.data();
+          if (d.changeId > latestChangeId) {
+            records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
+          }
+
+          if (unresolved) {
+            resolve();
+            unresolved = false;
+          }
+        });
+        // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
+        await this.resolveRecords(obj, records);
+        // TODO: Handle downloading status
+      });
+
+      this.firestoreUnsubscribes.push(unsubscribe);
+    });
+  }
+
+  private collectionPath(obj: any, isPrivate: boolean): string {
+    if (!isPrivate) {
       return `/${obj.constructor.name}`;
     }
     return `${this.userDocument()}/${obj.constructor.name}`;
   }
 
-  private documentPath(obj: any): string {
-    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
-  }
-
-  protected setupCloudSubscriptions(): Promise<any> {
-    // TODO: Can we subscribe to meta table, then automate setting up sync subcriptions?
-    //   Can we trigger start/stopping of this based on User subscription?
-    //   How do we handle user subscription local vs cloud?
-    // TODO: Subscribe to public meta table
-    // TODO: Subscribe to private meta table
-    this.subscribeCloudUser();
-    return Promise.resolve(undefined);
+  private documentPath(obj: any, isPrivate: boolean): string {
+    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj, isPrivate)}/${obj.id}`;
   }
 
   // User for private data
   private userDocument(): string {
-    if (this.localUser) {
-      return `/User/${this.localUser.firestoreAuthId}`;
+    if (this.user) {
+      return `/User/${this.user.authId}`;
     }
     throw new Error('No cloud user found.');
   }
 
-  protected async subscribeCloudUser(): Promise<void> {
+  private async subscribeCloudUser() {
     const docPath = `${this.userDocument()}`;
     const docRef = doc(this.db, docPath);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud
-    const userSubscription = onSnapshot(docRef, async (snapshot) => {
-      const data = this.deserialize(snapshot.data(), snapshot.id);
-      delete data.id; // Only do this on user...
-      const currentUser = await this.sqliteStore.user;
-      console.log('[subscribeCloudUser] about to assign', data, currentUser);
-      const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-      await updatedUser.save({}, false);
+    return new Promise<void>((resolve) => {
+      let unresolved = true;
+      const unsubscribe = onSnapshot(docRef, async (snapshot) => {
+        const data = this.deserialize(snapshot.data(), snapshot.id, true);
+        delete data.id; // Only do this on user...
+        const currentUser = this.user;
+        console.log('[subscribeCloudUser] about to assign', data, currentUser);
+        const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
+        await updatedUser.save({}, false);
 
-      if (updatedUser) {
-        console.log('[subscribeCloudUser] resolvedUser', updatedUser);
-        this.sqliteStore.updateUser();
-      }
+        if (unresolved) {
+          resolve();
+          unresolved = false;
+        }
+      });
+      this.firestoreUnsubscribes.push(unsubscribe);
     });
-    this.firestoreUnsubscribes.push(userSubscription);
-  }
-
-  // Cloud subscriptions are handled based on auth state
-  private async onAuthStateChange(authenticated: boolean) {
-    const lastState = this.authenticated;
-    if (lastState && !authenticated) {
-      this.unsubscribeSubscriptions();
-    } else if (!lastState && authenticated) {
-      await this.setupCloudSubscriptions();
-      this.updateCloudFromChangeLog();
-    }
-    this.authenticated = authenticated;
   }
 }

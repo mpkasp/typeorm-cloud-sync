@@ -25,7 +25,7 @@ export abstract class StoreRecord extends BaseEntity {
   protected updatedMs?: number;
 
   @Column()
-  isPublic = false;
+  isPrivate = true;
 
   protected constructor(init?: Partial<any>) {
     super();

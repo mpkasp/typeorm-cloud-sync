@@ -4,38 +4,67 @@ import {StoreRecord} from '../models/store-record.model';
 import {StoreChangeLog} from '../models/store-change-log.model';
 
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
-import { CloudSubject } from './cloud-subject';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
+import { User } from '../models/user.model';
+
+// Each store needs CRUD
+// A store needs to handle private & public data
+//  Public data:
+//    Subscribe when constructed
+//  Private data:
+//    Subscribe on authenticated & local user; unsubscribe on loss of either
+
+// When do you update cloud from changelog?
+//     When auth state changes --> cloud subscriptions then get set up --> then downloading happens
+//   After cloud subscriptions get set up, after downloading
+// Public Cloud States:
+//    1. Uninitialized
+//    2. Initializing: setting up subscriptions, downloading
+//    3. Initialized: public subscriptions set up, syncing to/from local store (READ ONLY, no changelog)
+// Private Cloud States:
+//    1. Uninitialized
+//    2. Initializing: setting up subscriptions, downloading, user has been authenticated
+//    3. Initialized: we are subscribed to local data
+
+// UpdateCloudFromChangeLog
+//  Setting up subscriptions doesn't need to be asynchronous
+//  Subscription setup can be immediate, then we immediately set some boolean to say "subscriptions are re-setting"
+//  We clear that boolean once "downloading" is done.
+
+// What starts/stops private cloud subscriptions?
+// Network, and User
+// If !network || !user unsubscribe
+// else subscribe
 
 export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean { return this.networkSubject.getValue() }
-  protected cloudDownloading: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
-  protected localSubjects: CloudSubject<any>[] = [];
-  protected cloudSubscriptions: Subscription[] = [];
+
+  public userSubject: BehaviorSubject<User | null> = new BehaviorSubject<User | null>(null);
+  public user$: Observable<User | null> = this.userSubject.asObservable();
+  public get user(): User | null { return this.userSubject.getValue() }
+
+  protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
+  public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
+  public get downloading(): Observable<boolean> { return this.downloadingSubject.asObservable() }
+
+  readonly privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
+  private lastUser: User | null = this.user;
 
-  protected constructor(readonly localStore: SqliteStore) {}
+  protected constructor(readonly localStore: SqliteStore,
+                        protected UserModel: typeof User,
+                        protected publicRecords: StoreRecord[],
+                        protected privateRecords: StoreRecord[]) {}
 
-  protected abstract setupCloudSubscriptions(): Promise<any>;
-
-  protected unsubscribeCloudSubscriptions() {
-    this.cloudSubscriptions.forEach(subscription => subscription.unsubscribe());
-    this.cloudSubscriptions = [];
+  protected async initialize() {
+    this.subscribeNetwork();
+    await this.subscribePublicCloud();
+    await this.subscribeLocalUser(); // Handles private cloud subscription
   }
 
-  public subscriptionsInitialized(): boolean {
-    return this.localSubjects.filter(s => !s.initialized).length === 0;
-  }
-
-  protected unsubscribeSubscriptions() {
-    console.log('[unsubscribeSubscriptions]');
-    this.unsubscribeCloudSubscriptions();
-    this.localSubjects.forEach(subject => subject.unsubscribe());
-  }
-
-  protected async subscribeNetwork() {
+  private subscribeNetwork() {
     const networkObservable = merge(
       of(navigator.onLine),
       fromEvent(window, 'online').pipe(mapTo(true)),
@@ -43,20 +72,32 @@ export abstract class CloudStore {
     );
     networkObservable.subscribe(this.networkSubject);
     networkObservable.subscribe(status => {
-      if (status) {
-        this.setupCloudSubscriptions();
-      } else {
-        this.unsubscribeCloudSubscriptions();
-        this.localSubjects.forEach(s => s.initialized = false);
-      }
+      // TODO: this may be OK if we guarantee that setting up subscriptions will eventually clear downloading
+      this.downloadingSubject.next(status);
     });
 
-    this.downloading.subscribe(async d => await this.updateCloudFromChangeLog());
+    this.downloading$.subscribe(async d => await this.updateCloudFromChangeLog());
   }
 
-  public get downloading(): Observable<boolean> {
-    return this.cloudDownloading.asObservable();
+  private subscribeLocalUser() {
+    this.user$.subscribe(async(user) => {
+      // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
+      // This may mess with sign out logic... need to think...
+      if (this.lastUser?.authId !== user?.authId) {
+        if(user?.authId) {
+          await this.subscribePrivateCloud();
+        } else {
+          this.unsubscribePrivateCloud();
+        }
+      }
+
+      this.lastUser = user;
+    });
   }
+
+  // *
+  // Cloud operations
+  // *
 
   // Create an object in the cloud from a local StoreRecord
   public abstract create(obj: StoreRecord): Promise<any>;
@@ -74,16 +115,36 @@ export abstract class CloudStore {
   // Deserialize object from the cloud into local object in dictionary format
   protected abstract deserialize(document: any): any;
 
-  // Update the cloud with any local changes stored in the change log
-  public async updateCloudFromChangeLog() {
+  // *
+  //  Set up cloud subscriptions
+  // *
+  protected abstract subscribePublicCloud(): any;
+  
+  protected abstract subscribePrivateCloud(): any;
 
+  protected abstract unsubscribePrivateCloud(): any;
+
+  // No reason to unsubscribe from public cloud
+
+  // *
+  // Sync functions
+  // *
+  // Update the cloud with any local changes stored in the change log - we don't want to call this until
+  public async updateCloudFromChangeLog() {
     if (!this.networkSubject.getValue()) {
       console.warn('[updateCloudFromChangeLog] No network, not updating cloud.');
       return;
     }
 
-    if (!this.subscriptionsInitialized()) {
+    // Don't updateCloud until cloud subscriptions are set up and we finish downloading
+    if (!this.privateCloudInitialized) {
       console.warn('[updateCloudFromChangeLog] Subscriptions not yet initialized, not updating cloud.');
+      return;
+    }
+
+    if (this.downloading) {
+      console.warn('[updateCloudFromChangeLog] Still downloading, not updating cloud.');
+      return;
     }
 
     const changes = await StoreChangeLog.find();
@@ -110,7 +171,6 @@ export abstract class CloudStore {
     const resolvedRecords = [];
     for (const obj of objs) {
       // Only need to resolve issues if there's also a local change pending...
-      // TODO: Make sure if disconnected from internet, we don't try to push local changes until we receive cloud records.
       resolvedRecords.push(this.resolveRecord(recordType, obj));
     }
     return resolvedRecords;
@@ -118,7 +178,6 @@ export abstract class CloudStore {
 
   // Helper to call proper resolve function when a new object is received from the cloud
   protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
-    // TODO: How to handle user?
     const localChange = await StoreChangeLog.findOne({where: {recordId: obj.id}});
     if (localChange) {
       console.log('[resolveRecords] Local change, need to resolve!');

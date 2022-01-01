@@ -6,7 +6,7 @@ import {Connection} from 'typeorm';
 import { User } from './models/user.model';
 
 export class SqliteStore {
-  public connection: Connection;
+  readonly connection: Connection;
 
   constructor(connection: Connection, public UserModel: typeof User) {
     this.connection = connection;

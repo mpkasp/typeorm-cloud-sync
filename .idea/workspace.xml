@@ -2,17 +2,15 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/src/cloud/cloud-subject.ts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/models/user.model.ts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/typeorm-cloud-sync.ts" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/user.subscriber.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/Greeter.test.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/Greeter.test.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud-firestore.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/cloud-subject.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/models/store-record.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-record.model.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sqlite-store.service.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/sqlite-store.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/user.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/user.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sqlite-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/sqlite-store.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tslint.json" beforeDir="false" afterPath="$PROJECT_DIR$/tslint.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -59,7 +57,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1640646481489</updated>
-      <workItem from="1640646483547" duration="20086000" />
+      <workItem from="1640646483547" duration="35248000" />
     </task>
     <servers />
   </component>

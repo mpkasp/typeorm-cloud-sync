@@ -4,7 +4,7 @@ import {Column, Entity} from 'typeorm';
 @Entity({name: 'user'})
 export class User extends StoreRecord {
   @Column({nullable: true})
-  public firestoreAuthId?: string | null = null;
+  public authId?: string | null = null;
 
   @Column({nullable: true})
   public email?: string;
