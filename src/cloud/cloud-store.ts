@@ -67,11 +67,10 @@ export abstract class CloudStore {
   ) {}
 
   protected async initialize() {
+    this.userSubject.next(await this.UserModel.findOne());
     this.subscribeNetwork();
-    console.log('[CloudStore - initialize]');
     this.downloadingSubject.next(true);
     await this.subscribePublicCloud();
-    console.log('[CloudStore - initialize] finished subscription to public cloud.');
     this.downloadingSubject.next(false);
     this.subscribeLocalUser(); // Handles private cloud subscription
   }

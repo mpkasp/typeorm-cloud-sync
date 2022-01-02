@@ -192,7 +192,6 @@ export class CloudFirebaseFirestore extends CloudStore {
       data.id = id;
     }
     // data.isPrivate = isPrivate;
-    console.log('[CloudFirebaseFirestore - deserialize]: ', data, id);
     return data;
   }
 
@@ -203,12 +202,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribePrivateCloud() {
-    // TODO: await cloud user??
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to cloud user.');
     await this.subscribeCloudUser();
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to: ', this.privateRecords);
     return this.privateRecords.forEach(async (PrivateRecord) => {
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to: ', PrivateRecord);
       await this.subscribeObj(PrivateRecord, true);
     }, Error());
   }
