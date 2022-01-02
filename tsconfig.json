@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "lib": ["es5", "es6", "dom"],
-    "outDir": "build/compiled",
+    "outDir": "./lib",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "target": "es5",
