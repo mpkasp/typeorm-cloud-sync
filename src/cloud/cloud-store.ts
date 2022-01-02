@@ -6,6 +6,7 @@ import { StoreChangeLog } from '../models/store-change-log.model';
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
+import { BaseUserSubscriber } from '../base-user.subscriber';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -73,6 +74,9 @@ export abstract class CloudStore {
     await this.subscribePublicCloud();
     this.downloadingSubject.next(false);
     this.subscribeLocalUser(); // Handles private cloud subscription
+
+    this.localStore.connection.subscribers.push(new StoreChangeLogSubscriber(this));
+    this.localStore.connection.subscribers.push(new BaseUserSubscriber(this.UserModel, this));
   }
 
   private subscribeNetwork() {
