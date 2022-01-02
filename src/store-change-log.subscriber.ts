@@ -15,7 +15,7 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
     // Cloud push should be attempted if we're authenticated and have internet
     // If we don't have internet, don't try to push
     // Retry on two events: when app opens (done), or when we have internet (to do)
-    if (this.cloud.network) {
+    if (this.cloud?.network) {
       console.log('[afterInsert]', this.cloud.network, event);
       return this.cloud.updateCloudFromChangeLog();
     } else {
