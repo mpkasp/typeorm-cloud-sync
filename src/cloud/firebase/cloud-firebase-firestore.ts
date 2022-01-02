@@ -204,7 +204,9 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected async subscribePrivateCloud() {
     // TODO: await cloud user??
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to cloud user.');
     await this.subscribeCloudUser();
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to: ', this.privateRecords);
     return this.privateRecords.forEach(async (PrivateRecord) => {
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to: ', PrivateRecord);
       await this.subscribeObj(PrivateRecord, true);
@@ -272,6 +274,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     const docPath = `${this.userDocument()}`;
     const docRef = doc(this.db, docPath);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud
+    console.log('[CloudFirebaseFirestore] ', docPath, docRef);
     return new Promise<void>((resolve) => {
       let unresolved = true;
       const unsubscribe = onSnapshot(docRef, async (snapshot) => {
