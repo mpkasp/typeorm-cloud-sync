@@ -191,7 +191,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     if (id) {
       data.id = id;
     }
-    data.isPrivate = isPrivate;
+    // data.isPrivate = isPrivate;
     console.log('[CloudFirebaseFirestore - deserialize]: ', data, id);
     return data;
   }
