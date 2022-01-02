@@ -220,7 +220,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     let latestChangeId = await obj.getLatestChangeId();
     const collectionPath = this.collectionPath(new obj(), isPrivate);
-
+    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath);
     return new Promise<void>((resolve) => {
       const collectionRef = collection(this.db, collectionPath);
       const q = query(collectionRef, where('changeId', '>', latestChangeId));
@@ -233,15 +233,15 @@ export class CloudFirebaseFirestore extends CloudStore {
           if (d.changeId > latestChangeId) {
             records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
           }
-
-          if (unresolved) {
-            resolve();
-            unresolved = false;
-          }
         });
         // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
         await this.resolveRecords(obj, records);
         // TODO: Handle downloading status
+        if (unresolved) {
+          console.log('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath, );
+          resolve();
+          unresolved = false;
+        }
       });
 
       this.firestoreUnsubscribes.push(unsubscribe);
