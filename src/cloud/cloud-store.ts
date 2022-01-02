@@ -69,12 +69,13 @@ export abstract class CloudStore {
 
   protected async initialize() {
     const user = await this.UserModel.findOne();
+    console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
     this.downloadingSubject.next(true);
     await this.subscribePublicCloud();
     if (user) {
-      this.subscribePrivateCloud();
+      await this.subscribePrivateCloud();
     }
     this.downloadingSubject.next(false);
     this.subscribeLocalUser(); // Handles private cloud subscription
@@ -133,9 +134,9 @@ export abstract class CloudStore {
   // *
   //  Set up cloud subscriptions
   // *
-  protected abstract subscribePublicCloud(): any;
+  protected abstract subscribePublicCloud(): Promise<any>;
 
-  protected abstract subscribePrivateCloud(): any;
+  protected abstract subscribePrivateCloud(): Promise<any>;
 
   protected abstract unsubscribePrivateCloud(): any;
 

@@ -2,7 +2,9 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -101,7 +103,7 @@
       <workItem from="1640646483547" duration="45635000" />
       <workItem from="1641092920682" duration="571000" />
       <workItem from="1641093997902" duration="449000" />
-      <workItem from="1641094686336" duration="10764000" />
+      <workItem from="1641094686336" duration="11278000" />
     </task>
     <servers />
   </component>
