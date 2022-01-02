@@ -191,11 +191,11 @@ export abstract class CloudStore {
   protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
     const localChange = await StoreChangeLog.findOne({ where: { recordId: obj.id } });
     if (localChange) {
-      console.log('[resolveRecords] Local change, need to resolve!');
+      console.log('[resolveRecords] Local change, need to resolve!', this.localStore);
       const localCopy = await recordType.findOne(obj.id);
       return await this.localStore.resolve(obj, localCopy);
     } else {
-      console.log('[resolveRecords] No local change, resolving from cloud.');
+      console.log('[resolveRecords] No local change, resolving from cloud.', this.localStore);
       return await this.localStore.resolve(obj);
     }
   }
