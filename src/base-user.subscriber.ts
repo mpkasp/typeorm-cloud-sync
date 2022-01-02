@@ -1,3 +1,5 @@
+// tslint:disable: no-console
+
 import { Connection, EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, UpdateEvent } from 'typeorm';
 import { BaseUser } from './models/base-user.model';
 import { CloudStore } from './cloud/cloud-store';
@@ -12,6 +14,7 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
 
   afterInsert(event: InsertEvent<BaseUser>): Promise<any> | void {
     const user = event.entity;
+    console.log('[BaseUserSubscriber - afterInsert]', user, this.cloudStore);
     if (this.cloudStore?.userSubject) {
       this.cloudStore.userSubject.next(user);
     }
@@ -19,6 +22,7 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
 
   afterUpdate(event: UpdateEvent<BaseUser>) {
     const user = event.databaseEntity;
+    console.log('[BaseUserSubscriber - afterUpdate]', user, this.cloudStore);
     if (this.cloudStore?.userSubject) {
       this.cloudStore.userSubject.next(user);
     }
