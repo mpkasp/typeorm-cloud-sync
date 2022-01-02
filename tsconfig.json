@@ -1,16 +1,25 @@
 {
   "compilerOptions": {
+    "lib": ["es5", "es6"],
+    "outDir": "build/compiled",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "es5",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "importHelpers": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "ES5",
-    "module": "CommonJS",
+    "sourceMap": true,
+    "noImplicitAny": true,
     "declaration": true,
-    "outDir": "./lib",
-    "strict": true,
-    "lib": [
-      "es2018",
-      "dom"
-    ]
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "stripInternal": true,
+    "pretty": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "downlevelIteration": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "**/__tests__/*"]
