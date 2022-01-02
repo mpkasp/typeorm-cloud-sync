@@ -99,6 +99,7 @@ export abstract class CloudStore {
       console.log('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
       if (this.lastUser?.authId !== user?.authId) {
         if (user?.authId) {
+          console.log('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
           this.downloadingSubject.next(true);
           await this.subscribePrivateCloud();
           this.downloadingSubject.next(false);
