@@ -87,6 +87,7 @@ export abstract class CloudStore {
   }
 
   private subscribeLocalUser() {
+    console.log('[CloudStore - subscribeLocalUser] setup.');
     this.userSubject.subscribe(async (user) => {
       // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
       // This may mess with sign out logic... need to think...
