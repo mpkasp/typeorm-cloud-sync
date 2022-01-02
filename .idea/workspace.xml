@@ -2,8 +2,10 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/typeorm-cloud-sync.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/typeorm-cloud-sync.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -102,7 +104,7 @@
       <workItem from="1640646483547" duration="45635000" />
       <workItem from="1641092920682" duration="571000" />
       <workItem from="1641093997902" duration="449000" />
-      <workItem from="1641094686336" duration="8232000" />
+      <workItem from="1641094686336" duration="8882000" />
     </task>
     <servers />
   </component>
