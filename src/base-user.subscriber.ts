@@ -12,11 +12,15 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
 
   afterInsert(event: InsertEvent<BaseUser>): Promise<any> | void {
     const user = event.entity;
-    this.cloudStore?.userSubject?.next(user);
+    if (this.cloudStore.userSubject) {
+      this.cloudStore?.userSubject?.next(user);
+    }
   }
 
   afterUpdate(event: UpdateEvent<BaseUser>) {
     const user = event.databaseEntity;
-    this.cloudStore?.userSubject?.next(user);
+    if (this.cloudStore.userSubject) {
+      this.cloudStore?.userSubject?.next(user);
+    }
   }
 }

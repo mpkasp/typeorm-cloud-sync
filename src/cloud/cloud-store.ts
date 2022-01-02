@@ -14,7 +14,7 @@ import { BaseUserSubscriber } from '../base-user.subscriber';
 //    Subscribe when constructed
 //  Private data:
 //    Subscribe on authenticated & local user; unsubscribe on loss of either
-
+//
 // When do you update cloud from changelog?
 //     When auth state changes --> cloud subscriptions then get set up --> then downloading happens
 //   After cloud subscriptions get set up, after downloading
@@ -26,12 +26,12 @@ import { BaseUserSubscriber } from '../base-user.subscriber';
 //    1. Uninitialized
 //    2. Initializing: setting up subscriptions, downloading, user has been authenticated
 //    3. Initialized: we are subscribed to local data
-
+//
 // UpdateCloudFromChangeLog
 //  Setting up subscriptions doesn't need to be asynchronous
 //  Subscription setup can be immediate, then we immediately set some boolean to say "subscriptions are re-setting"
 //  We clear that boolean once "downloading" is done.
-
+//
 // What starts/stops private cloud subscriptions?
 // Network, and User
 // If !network || !user unsubscribe
@@ -74,9 +74,6 @@ export abstract class CloudStore {
     await this.subscribePublicCloud();
     this.downloadingSubject.next(false);
     this.subscribeLocalUser(); // Handles private cloud subscription
-
-    this.localStore.connection.subscribers.push(new StoreChangeLogSubscriber(this));
-    this.localStore.connection.subscribers.push(new BaseUserSubscriber(this.UserModel, this));
   }
 
   private subscribeNetwork() {
