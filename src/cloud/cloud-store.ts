@@ -188,7 +188,7 @@ export abstract class CloudStore {
     const resolvedRecords = [];
     for (const obj of objs) {
       // Only need to resolve issues if there's also a local change pending...
-      resolvedRecords.push(this.resolveRecord(recordType, obj));
+      resolvedRecords.push(await this.resolveRecord(recordType, obj));
     }
     return resolvedRecords;
   }
