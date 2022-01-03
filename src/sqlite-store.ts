@@ -13,7 +13,7 @@ export class SqliteStore {
   }
 
   public async resolve(cloudRecord: StoreRecord, localRecord?: StoreRecord): Promise<StoreRecord | null> {
-    console.log('[CloudSync - SqliteStore - resolve]', localRecord, cloudRecord);
+    // console.log('[CloudSync - SqliteStore - resolve]', localRecord, cloudRecord);
     if (!localRecord) {
       console.log('[CloudSync - SqliteStore - resolve] no local record - update from cloud', cloudRecord);
       try {
