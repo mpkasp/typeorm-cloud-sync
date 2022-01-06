@@ -72,7 +72,7 @@ export abstract class CloudStore {
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
     const user = await this.UserModel.findOne();
-    console.log('[CloudStore - initialize]', this.UserModel, user);
+    // console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
     this.downloadingSubject.next(true);

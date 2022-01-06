@@ -262,6 +262,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // User for private data
   private userDocument(): string {
+    console.log('[userDocument] ', this.user);
     if (this.user) {
       return `/User/${this.user.authId}`;
     }
@@ -269,8 +270,11 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private async subscribeCloudUser() {
+    console.log('[subscribeCloudUser]');
     const docPath = `${this.userDocument()}`;
+    console.log('[subscribeCloudUser]', docPath);
     const docRef = doc(this.db, docPath);
+    console.log('[subscribeCloudUser]', docRef);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud
     console.log('[CloudFirebaseFirestore] ', docPath, docRef);
     return new Promise<void>((resolve) => {
