@@ -40,8 +40,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   public async initialize(sqliteStore: SqliteStore, app: FirebaseApp) {
+    this.db = getFirestore(app); // Must be set before initializeBase so we can set up cloud subscriptions
     await this._initializeBase(sqliteStore);
-    this.db = getFirestore(app);
   }
 
   // Implement CloudStore
@@ -272,7 +272,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   private async subscribeCloudUser() {
     console.log('[subscribeCloudUser] 1');
     const docPath = `${this.userDocument()}`;
-    console.log('[subscribeCloudUser] 2', docPath);
+    console.log('[subscribeCloudUser] 2', this.db, docPath);
     const docRef = doc(this.db, 'User', this.user.authId);
     console.log('[subscribeCloudUser] 3', docRef);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud
