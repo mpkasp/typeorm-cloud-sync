@@ -32,15 +32,16 @@ export class CloudFirebaseFirestore extends CloudStore {
   private firestoreUnsubscribes: Unsubscribe[] = [];
 
   constructor(
-    readonly sqliteStore: SqliteStore,
     protected UserModel: typeof BaseUser,
     protected publicRecords: typeof StoreRecord[],
     protected privateRecords: typeof StoreRecord[],
-    app: FirebaseApp,
   ) {
-    super(sqliteStore, UserModel, publicRecords, privateRecords);
+    super(UserModel, publicRecords, privateRecords);
+  }
+
+  public async initialize(sqliteStore: SqliteStore, app: FirebaseApp) {
+    await this._initializeBase(sqliteStore);
     this.db = getFirestore(app);
-    this.initialize();
   }
 
   // Implement CloudStore

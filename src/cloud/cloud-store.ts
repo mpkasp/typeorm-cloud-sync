@@ -59,15 +59,18 @@ export abstract class CloudStore {
   readonly privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
+  private localStore: SqliteStore;
 
+  // Note: Must be able to construct object to set up observables immediately at app runtime. We separate out
+  //   initialzation so that we can asynchronously set up the cloud app, sqlite store, etc..
   protected constructor(
-    readonly localStore: SqliteStore,
     protected UserModel: typeof BaseUser,
     protected publicRecords: typeof StoreRecord[],
     protected privateRecords: typeof StoreRecord[],
   ) {}
 
-  protected async initialize() {
+  protected async _initializeBase(localStore: SqliteStore) {
+    this.localStore = localStore;
     const user = await this.UserModel.findOne();
     console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
