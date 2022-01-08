@@ -27,12 +27,4 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
       this.cloudStore.userSubject.next(user);
     }
   }
-
-  afterRemove(event: RemoveEvent<BaseUser>): Promise<any> | void {
-    const user = event.databaseEntity;
-    console.log('[BaseUserSubscriber - afterRemove]', user, this.cloudStore);
-    if (this.cloudStore?.userSubject) {
-      this.cloudStore.userSubject.next(user);
-    }
-  }
 }
