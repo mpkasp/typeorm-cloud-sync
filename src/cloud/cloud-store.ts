@@ -96,19 +96,22 @@ export abstract class CloudStore {
 
   private subscribeLocalUser() {
     console.log('[CloudStore - subscribeLocalUser] setup.');
+    let subscribed = false;
     this.userSubject.subscribe(async (user) => {
-      // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
-      // This may mess with sign out logic... need to think...
       console.log('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
-      if (this.lastUser?.authId !== user?.authId) {
-        if (user?.authId) {
+      if (user?.authId) {
+        subscribed = true;
+        if (!subscribed) {
           console.log('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
           this.downloadingSubject.next(true);
           await this.subscribePrivateCloud();
           this.downloadingSubject.next(false);
         } else {
-          this.unsubscribePrivateCloud();
+          console.log('[CloudStore - subscribeLocalUser] Already subscribed.');
         }
+      } else {
+        this.unsubscribePrivateCloud();
+        subscribed = false;
       }
 
       this.lastUser = user;
@@ -170,7 +173,7 @@ export abstract class CloudStore {
     const changes = await StoreChangeLog.find();
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
-      console.log('updateCloudFromChangeLog], ', change);
+      console.log('[updateCloudFromChangeLog], ', change);
       const record = await change.getRecord(this.localStore.connection);
       if (record != null) {
         try {
