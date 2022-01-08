@@ -115,6 +115,11 @@ export abstract class CloudStore {
     });
   }
 
+  // Used when logging out and clearing database to trigger unsubscribing from cloud
+  public resetLocalUser() {
+    this.userSubject.next(null);
+  }
+
   // *
   // Cloud operations
   // *
