@@ -56,7 +56,7 @@ export abstract class CloudStore {
     return this.downloadingSubject.getValue();
   }
 
-  readonly privateCloudInitialized: boolean = false;
+  protected privateCloudInitialized: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
   private localStore: SqliteStore;
