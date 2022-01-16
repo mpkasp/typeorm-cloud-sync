@@ -66,9 +66,9 @@ export class CloudFirebaseFirestore extends CloudStore {
     // console.log('[updateStoreRecord]', modelName, baseDocument);
 
     if (modelName !== 'User') {
-      // console.log('[updateStoreRecord] Not User');
+      console.log('[updateStoreRecord] Not User', collectionPath);
       const metaCollection = baseDocument.path + '/Meta';
-      // console.log('[updateStoreRecord] ', metaCollection);
+      console.log('[updateStoreRecord] ', metaCollection);
       const metaCollectionRef = collection(this.db, metaCollection);
       // console.log('[updateStoreRecord] ', metaCollectionRef);
       const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName), limit(1)));
