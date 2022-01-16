@@ -255,7 +255,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   private collectionPath(obj: StoreRecord): string {
     if (!obj.isPrivate) {
-      return `/${obj.constructor.name}`;
+      return `${obj.constructor.name}`;
     }
     return `${this.userDocument()}/${obj.constructor.name}`;
   }
