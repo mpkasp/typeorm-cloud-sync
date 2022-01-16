@@ -10,6 +10,8 @@ import {
 import { StoreChangeLog } from './store-change-log.model';
 
 export abstract class StoreRecord extends BaseEntity {
+  recordChangeTimestamp: Date = new Date();
+
   @PrimaryGeneratedColumn('uuid')
   id?: string;
 
@@ -18,9 +20,6 @@ export abstract class StoreRecord extends BaseEntity {
 
   @Column()
   changeId: number = 1;
-
-  @Column()
-  recordChangeTimestamp: Date = new Date();
 
   @Column()
   protected createdMs?: number;
