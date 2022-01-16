@@ -21,7 +21,6 @@ import {
   query,
   where,
   limit,
-  orderBy,
   runTransaction,
   CollectionReference,
   Unsubscribe,
@@ -47,12 +46,12 @@ export class CloudFirebaseFirestore extends CloudStore {
   // Implement CloudStore
 
   public async create(obj: StoreRecord) {
-    const collectionPath = this.collectionPath(obj, true);
+    const collectionPath = this.collectionPath(obj);
     return addDoc(collection(this.db, collectionPath), obj.raw());
   }
 
   public async update(obj: StoreRecord) {
-    const documentPath = this.documentPath(obj, true);
+    const documentPath = this.documentPath(obj);
     const docRef = doc(this.db, documentPath);
     return setDoc(docRef, obj.raw(), { merge: true });
   }
@@ -60,14 +59,14 @@ export class CloudFirebaseFirestore extends CloudStore {
   public async updateStoreRecord(obj: StoreRecord) {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
-    const collectionPath = this.collectionPath(obj, obj.isPrivate);
+    const collectionPath = this.collectionPath(obj);
     const baseCollection = collection(this.db, collectionPath);
     const baseDocument = doc(this.db, this.userDocument());
     // console.log('[updateStoreRecord]', modelName, baseDocument);
 
     if (modelName !== 'User') {
       console.log('[updateStoreRecord] Not User', collectionPath);
-      const metaCollection = baseDocument.path + '/Meta';
+      const metaCollection = this.metaCollectionPath(obj);
       console.log('[updateStoreRecord] ', metaCollection);
       const metaCollectionRef = collection(this.db, metaCollection);
       // console.log('[updateStoreRecord] ', metaCollectionRef);
@@ -166,9 +165,9 @@ export class CloudFirebaseFirestore extends CloudStore {
       });
   }
 
-  public async delete(obj: any, fromDb: boolean = false) {
+  public async delete(obj: StoreRecord, fromDb: boolean = false) {
     if (fromDb) {
-      const documentPath = this.documentPath(obj, true);
+      const documentPath = this.documentPath(obj);
       const documentRef = doc(this.db, documentPath);
       return deleteDoc(documentRef);
     }
@@ -222,7 +221,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     let latestChangeId = await obj.getLatestChangeId();
-    const collectionPath = this.collectionPath(new obj(), isPrivate);
+    const collectionPath = this.collectionPath(new obj());
     console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath);
     return new Promise<void>((resolve) => {
       const collectionRef = collection(this.db, collectionPath);
@@ -251,15 +250,22 @@ export class CloudFirebaseFirestore extends CloudStore {
     });
   }
 
-  private collectionPath(obj: any, isPrivate: boolean): string {
-    if (!isPrivate) {
+  private collectionPath(obj: StoreRecord): string {
+    if (!obj.isPrivate) {
       return `/${obj.constructor.name}`;
     }
     return `${this.userDocument()}/${obj.constructor.name}`;
   }
 
-  private documentPath(obj: any, isPrivate: boolean): string {
-    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj, isPrivate)}/${obj.id}`;
+  private metaCollectionPath(obj: StoreRecord): string {
+    if (!obj.isPrivate) {
+      return `Meta`;
+    }
+    return doc(this.db, this.userDocument()).path + '/Meta';
+  }
+
+  private documentPath(obj: StoreRecord): string {
+    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
   }
 
   // User for private data
