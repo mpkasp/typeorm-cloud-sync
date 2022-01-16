@@ -46,21 +46,21 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Implement CloudStore
 
-  public async create(obj: any) {
+  public async create(obj: StoreRecord) {
     const collectionPath = this.collectionPath(obj, true);
     return addDoc(collection(this.db, collectionPath), obj.raw());
   }
 
-  public async update(obj: any) {
+  public async update(obj: StoreRecord) {
     const documentPath = this.documentPath(obj, true);
     const docRef = doc(this.db, documentPath);
     return setDoc(docRef, obj.raw(), { merge: true });
   }
 
-  public async updateStoreRecord(obj: any) {
+  public async updateStoreRecord(obj: StoreRecord) {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
-    const collectionPath = this.collectionPath(obj, true);
+    const collectionPath = this.collectionPath(obj, obj.isPrivate);
     const baseCollection = collection(this.db, collectionPath);
     const baseDocument = doc(this.db, this.userDocument());
     // console.log('[updateStoreRecord]', modelName, baseDocument);
@@ -131,7 +131,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     }
   }
 
-  public updatePublicStoreRecord(model: any, metaDocRef: any, collectionRef: CollectionReference): Promise<any> {
+  public updatePublicStoreRecord(model: StoreRecord, metaDocRef: any, collectionRef: CollectionReference): Promise<any> {
     console.log('[updatePublicStoreRecord]', model);
     return runTransaction(this.db, (transaction) =>
       transaction.get(metaDocRef).then((metaDoc) => {

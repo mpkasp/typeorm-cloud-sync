@@ -20,13 +20,16 @@ export abstract class StoreRecord extends BaseEntity {
   changeId: number = 1;
 
   @Column()
+  recordChangeTimestamp: Date = new Date();
+
+  @Column()
   protected createdMs?: number;
 
   @Column()
   protected updatedMs?: number;
 
-  // @Column({ type: 'boolean' })
-  // isPrivate: boolean = true;
+  @Column({ type: 'boolean' })
+  isPrivate: boolean = true;
 
   protected constructor(init?: Partial<any>) {
     super();
