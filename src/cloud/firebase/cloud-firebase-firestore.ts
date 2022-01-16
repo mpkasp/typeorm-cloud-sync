@@ -197,6 +197,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected async subscribePublicCloud() {
     return this.publicRecords.forEach(async (PublicRecord) => {
+      console.log('[subscribePublicCloud]', PublicRecord);
       await this.subscribeObj(PublicRecord, false);
     }, Error());
   }
@@ -221,8 +222,10 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     let latestChangeId = await obj.getLatestChangeId();
-    const collectionPath = this.collectionPath(new obj());
-    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath);
+    const objInstance = new obj();
+    objInstance.isPrivate = isPrivate;
+    const collectionPath = this.collectionPath(objInstance);
+    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath);
     return new Promise<void>((resolve) => {
       const collectionRef = collection(this.db, collectionPath);
       const q = query(collectionRef, where('changeId', '>', latestChangeId));
