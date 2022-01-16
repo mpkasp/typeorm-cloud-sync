@@ -225,7 +225,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath);
+    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
     return new Promise<void>((resolve) => {
       const collectionRef = collection(this.db, collectionPath);
       const q = query(collectionRef, where('changeId', '>', latestChangeId));
