@@ -136,15 +136,15 @@ export class CloudFirebaseFirestore extends CloudStore {
       transaction.get(metaDocRef).then((metaDoc) => {
         let changeId = 0;
         if (metaDoc.exists()) {
-          console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data());
+          // console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data());
           // @ts-ignore
           changeId = metaDoc.data().changeId + 1;
           model.changeId = changeId;
           model.recordChangeTimestamp = new Date();
-          console.log('[updatePublicStoreRecord] collectionRef.path: ', collectionRef.path);
+          // console.log('[updatePublicStoreRecord] collectionRef.path: ', collectionRef.path);
           const docRef = doc(this.db, collectionRef.path + '/' + model.id);
           // const docRef = collectionRef.doc(model.id);
-          console.log('[updatePublicStoreRecord]', model, model.raw());
+          // console.log('[updatePublicStoreRecord]', model, model.raw());
           // Need merge = true if we want to allow migrations since it uses the uid property
           transaction.set(docRef, model.raw(), { merge: true });
           transaction.update(metaDoc.ref, { changeId });
@@ -179,6 +179,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     // if (data.hasOwnProperty('created')) {
     //   delete data.created;
     // }
+    console.log('[deserialize]', data, id, isPrivate);
     for (const key in data) {
       if (data.hasOwnProperty(key) && data[key] && typeof data[key].toDate === 'function') {
         data[key] = data[key].toDate();
@@ -225,7 +226,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
+    // console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
     return new Promise<void>((resolve) => {
       const collectionRef = collection(this.db, collectionPath);
       const q = query(collectionRef, where('changeId', '>', latestChangeId));
@@ -273,7 +274,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // User for private data
   private userDocument(): string {
-    console.log('[userDocument] ', this.user);
+    // console.log('[userDocument] ', this.user);
     if (this.user) {
       return `/User/${this.user.authId}`;
     }
