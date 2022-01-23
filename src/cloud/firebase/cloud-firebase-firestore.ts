@@ -59,12 +59,11 @@ export class CloudFirebaseFirestore extends CloudStore {
   public async updateStoreRecord(obj: StoreRecord) {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
-    const collectionPath = this.collectionPath(obj);
-    const baseCollection = collection(this.db, collectionPath);
-    const baseDocument = doc(this.db, this.userDocument());
-    // console.log('[updateStoreRecord]', modelName, baseDocument);
+    // console.log('[updateStoreRecord]', modelName);
 
     if (modelName !== 'User') {
+      const collectionPath = this.collectionPath(obj);
+      const baseCollection = collection(this.db, collectionPath);
       console.log('[updateStoreRecord] Not User', collectionPath);
       const metaCollection = this.metaCollectionPath(obj);
       console.log('[updateStoreRecord] ', metaCollection);
