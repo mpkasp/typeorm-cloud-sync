@@ -89,8 +89,10 @@ export class CloudFirebaseFirestore extends CloudStore {
       return this.updatePublicStoreRecord(obj, metaDocRef, baseCollection);
     } else {
       // console.log('[updateStoreRecord] User');
-      // console.log('[updateStoreRecord] User Document: ', this.userDocument());
+      console.log('[updateStoreRecord] User Document: ', obj);
       const user = obj as BaseUser;
+      console.log('[updateStoreRecord] User Document: ', user);
+      console.log('[updateStoreRecord] User Document: ', user.authId);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
       const document = await getDoc(userDocRef);
       // console.log('[updateStoreRecord] User', document.exists);
@@ -279,7 +281,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     if (!authId) {
       authId = this.user.authId;
     }
-    if (this.user) {
+    if (authId) {
       return `/User/${authId}`;
     }
     throw new Error('No cloud user found.');
