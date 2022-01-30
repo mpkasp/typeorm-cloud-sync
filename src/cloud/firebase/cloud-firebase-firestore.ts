@@ -209,11 +209,12 @@ export class CloudFirebaseFirestore extends CloudStore {
     console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', this.privateRecords);
     await this.subscribeCloudUser();
     console.log('[CloudFirebaseFirestore - subscribePrivateCloud], subscribed to user');
-    await this.privateRecords.forEach(async (PrivateRecord) => {
+    for (let i = 0; i < this.privateRecords.length; i++) {
+      const PrivateRecord = this.privateRecords[i];
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
-    }, Error());
+    }
     this.privateCloudInitialized = true;
   }
 
