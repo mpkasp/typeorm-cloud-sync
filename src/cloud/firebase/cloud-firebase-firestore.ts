@@ -206,11 +206,13 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribePrivateCloud() {
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud]');
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', this.privateRecords);
     await this.subscribeCloudUser();
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud], subsribed to user');
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud], subscribed to user');
     await this.privateRecords.forEach(async (PrivateRecord) => {
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
     }, Error());
     this.privateCloudInitialized = true;
   }
@@ -242,7 +244,7 @@ export class CloudFirebaseFirestore extends CloudStore {
             records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
           }
         });
-        // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
+        console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
         await this.resolveRecords(obj, records);
         // TODO: Handle downloading status
         if (unresolved) {
