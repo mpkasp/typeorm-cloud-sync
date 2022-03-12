@@ -39,6 +39,9 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   public async initialize(sqliteStore: SqliteStore, app: FirebaseApp) {
+    // TODO: How to catch "Could not reach Cloud Firestore backend."?
+    //   Could not reach Cloud Firestore backend. Connection failed 1 times. Most recent error: FirebaseError: [code=unknown]: Fetching auth token failed: Firebase: Error (auth/network-request-failed).
+    //   This typically indicates that your device does not have a healthy Internet connection at the moment. The client will operate in offline mode until it is able to successfully connect to the backend.
     this.db = getFirestore(app); // Must be set before initializeBase so we can set up cloud subscriptions
     await this._initializeBase(sqliteStore);
   }

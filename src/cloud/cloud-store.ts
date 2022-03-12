@@ -157,6 +157,8 @@ export abstract class CloudStore {
   // Sync functions
   // *
   // Update the cloud with any local changes stored in the change log - we don't want to call this until
+  // TODO: This could be a database write error failure point - if we receive multiple changes in a row from the cloud
+  //   the local DB may get 2 updates in a row and collide. To fix this we can consider populating a queue to update the DB
   public async updateCloudFromChangeLog() {
     if (!this.networkSubject.getValue()) {
       console.warn('[updateCloudFromChangeLog] No network, not updating cloud.');
