@@ -1,4 +1,5 @@
 # TypeOrm Cloud Sync
+To install this locally, run `npm pack` to create a local tgz. Then install the tgz `npm install [tgz]`
 
 Usage:
 
