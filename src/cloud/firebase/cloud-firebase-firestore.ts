@@ -67,9 +67,8 @@ export class CloudFirebaseFirestore extends CloudStore {
     if (modelName !== 'User') {
       const collectionPath = this.collectionPath(obj);
       const baseCollection = collection(this.db, collectionPath);
-      console.log('[updateStoreRecord] Not User', collectionPath);
       const metaCollection = this.metaCollectionPath(obj);
-      console.log('[updateStoreRecord] ', metaCollection);
+      console.log('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
       const metaCollectionRef = collection(this.db, metaCollection);
       // console.log('[updateStoreRecord] ', metaCollectionRef);
       const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName), limit(1)));
@@ -93,7 +92,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       // console.log('[updateStoreRecord] User');
       console.log('[updateStoreRecord] User Document: ', obj);
       const user = obj as BaseUser;
-      console.log('[updateStoreRecord] User Document: ', user, user?.authId);
+      // console.log('[updateStoreRecord] User Document: ', user, user?.authId);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
       const document = await getDoc(userDocRef);
       // console.log('[updateStoreRecord] User', document.exists);
@@ -183,7 +182,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     // if (data.hasOwnProperty('created')) {
     //   delete data.created;
     // }
-    console.log('[deserialize]', data, id, isPrivate);
+    // console.log('[deserialize]', data, id, isPrivate);
     for (const key in data) {
       if (data.hasOwnProperty(key) && data[key] && typeof data[key].toDate === 'function') {
         data[key] = data[key].toDate();
@@ -247,7 +246,7 @@ export class CloudFirebaseFirestore extends CloudStore {
             records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
           }
         });
-        console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
+        // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
         await this.resolveRecords(obj, records);
         // TODO: Handle downloading status
         if (unresolved) {
@@ -294,11 +293,11 @@ export class CloudFirebaseFirestore extends CloudStore {
   private async subscribeCloudUser() {
     console.log('[subscribeCloudUser] 1');
     const docPath = `${this.userDocument()}`;
-    console.log('[subscribeCloudUser] 2', this.db, docPath);
+    // console.log('[subscribeCloudUser] 2', this.db, docPath);
     const docRef = doc(this.db, 'User', this.user.authId);
-    console.log('[subscribeCloudUser] 3', docRef);
+    // console.log('[subscribeCloudUser] 3', docRef);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud
-    console.log('[CloudFirebaseFirestore] ', docPath, docRef);
+    // console.log('[CloudFirebaseFirestore] ', docPath, docRef);
     return new Promise<void>((resolve) => {
       let unresolved = true;
       const unsubscribe = onSnapshot(docRef, async (snapshot) => {

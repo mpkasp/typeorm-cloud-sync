@@ -14,7 +14,7 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
 
   afterInsert(event: InsertEvent<BaseUser>): Promise<any> | void {
     const user = event.entity;
-    console.log('[BaseUserSubscriber - afterInsert]', user, this.cloudStore);
+    // console.log('[BaseUserSubscriber - afterInsert]', user, this.cloudStore);
     if (this.cloudStore?.userSubject) {
       this.cloudStore.userSubject.next(user);
     }
@@ -22,7 +22,7 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
 
   afterUpdate(event: UpdateEvent<BaseUser>) {
     const user = event.databaseEntity;
-    console.log('[BaseUserSubscriber - afterUpdate]', user, this.cloudStore);
+    // console.log('[BaseUserSubscriber - afterUpdate]', user, this.cloudStore);
     if (this.cloudStore?.userSubject) {
       this.cloudStore.userSubject.next(user);
     }
