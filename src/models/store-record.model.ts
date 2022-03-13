@@ -130,7 +130,7 @@ export abstract class StoreRecord extends BaseEntity {
     if (updateChangeLog) {
       // console.log('[save] saving store record, update change log:', updateChangeLog);
       // Removed await from update change log - this speeds things up in the ui nicely, but it may affect function. Be aware!
-      this.updateChangeLog();
+      await this.updateChangeLog();
     }
     return savedRecord;
   }

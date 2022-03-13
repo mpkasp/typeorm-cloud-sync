@@ -93,8 +93,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       // console.log('[updateStoreRecord] User');
       console.log('[updateStoreRecord] User Document: ', obj);
       const user = obj as BaseUser;
-      console.log('[updateStoreRecord] User Document: ', user);
-      console.log('[updateStoreRecord] User Document: ', user.authId);
+      console.log('[updateStoreRecord] User Document: ', user, user?.authId);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
       const document = await getDoc(userDocRef);
       // console.log('[updateStoreRecord] User', document.exists);
