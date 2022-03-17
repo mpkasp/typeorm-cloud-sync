@@ -200,21 +200,25 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribePublicCloud() {
-    return this.publicRecords.forEach(async (PublicRecord) => {
-      console.log('[subscribePublicCloud]', PublicRecord);
+    console.log('[CloudFirebaseFirestore - subscribePublicCloud] subscribing to public records!');
+    for (const PublicRecord of this.publicRecords) {
+      console.log('[CloudFirebaseFirestore - subscribePublicCloud]', PublicRecord.name);
       await this.subscribeObj(PublicRecord, false);
-    }, Error());
+      console.log('[CloudFirebaseFirestore - subscribePublicCloud] done', PublicRecord.name);
+    }
   }
 
   protected async subscribePrivateCloud() {
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', this.privateRecords);
-    if (this.firestoreUnsubscribes.length > 0) {
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] already subscribed');
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to private records!');
+    if (this.privateCloudInitialized) {
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] already initialized');
       return;
     }
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud], subscribed to user');
+    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done User');
     // for (let i = 0; i < this.privateRecords.length; i++) {
+    //   const PrivateRecord = this.privateRecords[i];
     for (const PrivateRecord of this.privateRecords) {
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
@@ -295,8 +299,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private async subscribeCloudUser() {
-    console.log('[subscribeCloudUser] 1');
-    const docPath = `${this.userDocument()}`;
+    console.log('[CloudFirebaseFirestore - subscribeCloudUser] 1');
+    // const docPath = `${this.userDocument()}`;
     // console.log('[subscribeCloudUser] 2', this.db, docPath);
     const docRef = doc(this.db, 'User', this.user.authId);
     // console.log('[subscribeCloudUser] 3', docRef);
@@ -308,7 +312,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         const data = this.deserialize(snapshot.data(), snapshot.id, true);
         delete data.id; // Only do this on user...
         const currentUser = this.user;
-        console.log('[subscribeCloudUser] about to assign', data, currentUser);
+        console.log('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
         const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
         await updatedUser.save({}, false);
 

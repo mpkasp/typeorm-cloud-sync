@@ -1,6 +1,8 @@
 # TypeOrm Cloud Sync
 To install this locally, run `npm pack` to create a local tgz. Then install the tgz `npm install [tgz]`
 
+!!TODO!! Does not gracefully handle concurrent writes to a sqlite db. Kind of handled on initialization by serializing setting up firestore subscribers, but we should probably handle it within firestore subscribers when resolving records.
+
 Usage:
 
 1. Set up your typeorm connection, then pass your connection to set up sqlite store:
