@@ -208,6 +208,10 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected async subscribePrivateCloud() {
     console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', this.privateRecords);
+    if (this.firestoreUnsubscribes.length > 0) {
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] already subscribed');
+      return;
+    }
     await this.subscribeCloudUser();
     console.log('[CloudFirebaseFirestore - subscribePrivateCloud], subscribed to user');
     // for (let i = 0; i < this.privateRecords.length; i++) {
