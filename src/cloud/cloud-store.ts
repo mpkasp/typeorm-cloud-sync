@@ -6,6 +6,7 @@ import { StoreChangeLog } from '../models/store-change-log.model';
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
+import {getManager} from 'typeorm';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -56,6 +57,7 @@ export abstract class CloudStore {
   }
 
   protected privateCloudInitialized: boolean = false;
+  private uploading: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
   private localStore: SqliteStore;
@@ -181,10 +183,14 @@ export abstract class CloudStore {
     for (const change of changes) {
       console.log('[updateCloudFromChangeLog], ', change);
       const record = await change.getRecord(this.localStore.connection);
+      console.log('[updateCloudFromChangeLog] record: ', record);
       if (record != null) {
         try {
+          console.log('[updateCloudFromChangeLog] update store record');
           await this.updateStoreRecord(record);
+          console.log('[updateCloudFromChangeLog] done, now remove change');
           await change.remove();
+          console.log('[updateCloudFromChangeLog] done removing change');
         } catch (err) {
           console.warn(err);
         }

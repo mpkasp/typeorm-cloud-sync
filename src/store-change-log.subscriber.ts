@@ -1,5 +1,5 @@
 // tslint:disable: no-console
-import { EntitySubscriberInterface, EventSubscriber, InsertEvent } from 'typeorm';
+import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent} from 'typeorm';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
@@ -11,15 +11,12 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
     return StoreChangeLog;
   }
 
-  afterInsert(event: InsertEvent<StoreChangeLog>) {
-    // Cloud push should be attempted if we're authenticated and have internet
-    // If we don't have internet, don't try to push
-    // Retry on two events: when app opens (done), or when we have internet (to do)
+  afterTransactionCommit(event: TransactionCommitEvent): Promise<any> | void {
     if (this.cloud?.network) {
-      // console.log('[StoreChangeLogSubscriber - afterInsert]', this.cloud.network, event);
+      console.log('[StoreChangeLogSubscriber - afterTransactionCommit]', this.cloud.network, event);
       return this.cloud.updateCloudFromChangeLog();
     } else {
-      console.log('[StoreChangeLogSubscriber - afterInsert] No cloud, or network, not updating...', this.cloud);
+      console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
     }
   }
 }

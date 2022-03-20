@@ -1,4 +1,4 @@
-import { AfterInsert, BaseEntity, Column, Connection, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import {AfterInsert, BaseEntity, Column, Connection, Entity, EntityManager, PrimaryGeneratedColumn} from 'typeorm';
 import { StoreRecord } from './store-record.model';
 
 @Entity({ name: 'storechangelog' })
@@ -29,5 +29,9 @@ export class StoreChangeLog extends BaseEntity {
 
   public async getRecord(connection: Connection): Promise<StoreRecord> {
     return (await connection.getRepository(this.tableName).findOne(this.recordId)) as StoreRecord;
+  }
+
+  public async getRecordWithManager(manager: EntityManager): Promise<StoreRecord> {
+    return (await manager.getRepository(this.tableName).findOne(this.recordId)) as StoreRecord;
   }
 }
