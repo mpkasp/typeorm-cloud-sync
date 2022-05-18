@@ -127,7 +127,7 @@ export abstract class StoreRecord extends BaseEntity {
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
     console.log('[save]', this, updateChangeLog, options);
     const savedRecord = await super.save(options);
-    console.log('[save] saved record', this, updateChangeLog, options);
+    console.log('[save] saved record', this, updateChangeLog, options, savedRecord);
     if (updateChangeLog) {
       console.log('[save] saving store record, update change log:', updateChangeLog);
       // Removed await from update change log - this speeds things up in the ui nicely, but it may affect function. Be aware!
