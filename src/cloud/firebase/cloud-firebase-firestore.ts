@@ -200,29 +200,29 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribePublicCloud() {
-    console.log('[CloudFirebaseFirestore - subscribePublicCloud] subscribing to public records!');
+    // console.log('[CloudFirebaseFirestore - subscribePublicCloud] subscribing to public records!');
     for (const PublicRecord of this.publicRecords) {
       console.log('[CloudFirebaseFirestore - subscribePublicCloud]', PublicRecord.name);
       await this.subscribeObj(PublicRecord, false);
-      console.log('[CloudFirebaseFirestore - subscribePublicCloud] done', PublicRecord.name);
+      // console.log('[CloudFirebaseFirestore - subscribePublicCloud] done', PublicRecord.name);
     }
   }
 
   protected async subscribePrivateCloud() {
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to private records!');
+    // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to private records!');
     if (this.privateCloudInitialized) {
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud] already initialized');
       return;
     }
     console.log('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done User');
+    // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done User');
     // for (let i = 0; i < this.privateRecords.length; i++) {
     //   const PrivateRecord = this.privateRecords[i];
     for (const PrivateRecord of this.privateRecords) {
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
+      // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
     }
     this.privateCloudInitialized = true;
   }
@@ -236,7 +236,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   // Done implementing CloudStore, now helper functions:
 
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    let latestChangeId = await obj.getLatestChangeId();
+    let latestChangeId = await obj.getLatestChangeId(isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -246,7 +246,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       const q = query(collectionRef, where('changeId', '>', latestChangeId));
       let unresolved = true;
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        latestChangeId = await obj.getLatestChangeId();
+        latestChangeId = await obj.getLatestChangeId(isPrivate);
         const records: StoreRecord[] = [];
         snapshot.docs.forEach((docRef) => {
           const d = docRef.data();

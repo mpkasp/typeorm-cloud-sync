@@ -2,7 +2,7 @@ import {
   BaseEntity,
   BeforeInsert,
   BeforeUpdate,
-  Column, getManager,
+  Column, getManager, Index,
   ObjectType,
   PrimaryGeneratedColumn,
   SaveOptions,
@@ -15,6 +15,7 @@ export abstract class StoreRecord extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id?: string;
 
+  @Index()
   @Column({ type: 'boolean' })
   isDeleted: boolean = false;
 
@@ -27,6 +28,7 @@ export abstract class StoreRecord extends BaseEntity {
   @Column()
   protected updatedMs?: number;
 
+  @Index()
   @Column({ type: 'boolean' })
   isPrivate: boolean = true;
 
@@ -38,12 +40,15 @@ export abstract class StoreRecord extends BaseEntity {
     Object.assign(this, init);
   }
 
-  static async getLatestRecord() {
-    return await this.createQueryBuilder(this.name).orderBy('changeId', 'DESC').getOne();
+  static async getLatestRecord(isPrivate: boolean) {
+    const isPrivateQuery = isPrivate ? 1 : 0;
+    return await this.createQueryBuilder(this.name)
+        .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
+        .orderBy('changeId', 'DESC').getOne();
   }
 
-  static async getLatestChangeId(): Promise<number> {
-    const latestObj = await this.getLatestRecord();
+  static async getLatestChangeId(isPrivate: boolean): Promise<number> {
+    const latestObj = await this.getLatestRecord(isPrivate);
     return latestObj ? latestObj.changeId : 0;
   }
 

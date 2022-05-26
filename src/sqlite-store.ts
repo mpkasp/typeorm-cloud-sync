@@ -2,7 +2,7 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import { Connection } from 'typeorm';
+import {Connection, getConnection} from 'typeorm';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
@@ -59,5 +59,18 @@ export class SqliteStore {
 
   public async saveRecord(record: StoreRecord, updateChangeLog: boolean = true): Promise<StoreRecord> {
     return await record.save({}, updateChangeLog);
+  }
+
+  public async dropPrivateTypeOrmCloudSyncRecords() {
+    await getConnection().createQueryBuilder().delete().from(StoreChangeLog).execute();
+  }
+
+  public async dropPrivateRecords(recordName: typeof StoreRecord) {
+    return getConnection()
+        .createQueryBuilder()
+        .delete()
+        .from(recordName)
+        .where("isPrivate = 1")
+        .execute();
   }
 }
