@@ -21,10 +21,15 @@ import {
   query,
   where,
   limit,
+  orderBy,
+  startAfter,
   runTransaction,
   CollectionReference,
   Unsubscribe,
 } from '@firebase/firestore';
+import firebase from 'firebase/compat';
+import DocumentSnapshot = firebase.firestore.DocumentSnapshot;
+import QuerySnapshot = firebase.firestore.QuerySnapshot;
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
@@ -234,28 +239,35 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   // Done implementing CloudStore, now helper functions:
-
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
+    const queryLimit = 500;
     let latestChangeId = await obj.getLatestChangeId(isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    // console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
-    return new Promise<void>((resolve) => {
-      const collectionRef = collection(this.db, collectionPath);
-      const q = query(collectionRef, where('changeId', '>', latestChangeId));
+    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
+    return new Promise<void>(async (resolve) => {
       let unresolved = true;
+      const collectionRef = collection(this.db, collectionPath);
+
+      let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy("changeId"), limit(queryLimit));
+      let documentSnapshots = await getDocs(q);
+      console.log(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`);
+      await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
+
+      while (documentSnapshots.size === queryLimit) {
+        const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length-1]; // Get cursor
+        latestChangeId = await obj.getLatestChangeId(isPrivate);
+        q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy("changeId"), startAfter(lastVisible), limit(queryLimit));
+
+        documentSnapshots = await getDocs(q);
+        console.log(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`);
+        await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
+      }
+
       const unsubscribe = onSnapshot(q, async (snapshot) => {
         latestChangeId = await obj.getLatestChangeId(isPrivate);
-        const records: StoreRecord[] = [];
-        snapshot.docs.forEach((docRef) => {
-          const d = docRef.data();
-          if (d.changeId > latestChangeId) {
-            records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
-          }
-        });
-        // console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
-        await this.resolveRecords(obj, records);
+        await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
         // TODO: Handle downloading status
         if (unresolved) {
           console.log('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath, );
@@ -266,6 +278,18 @@ export class CloudFirebaseFirestore extends CloudStore {
 
       this.firestoreUnsubscribes.push(unsubscribe);
     });
+  }
+
+  private async resolveSnapshot(obj, snapshot, latestChangeId: number, isPrivate: boolean, collectionPath: string) {
+    const records: StoreRecord[] = [];
+    snapshot.docs.forEach((docRef) => {
+      const d = docRef.data();
+      if (d.changeId > latestChangeId) {
+        records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
+      }
+    });
+    console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
+    await this.resolveRecords(obj, records);
   }
 
   private collectionPath(obj: StoreRecord): string {

@@ -1,6 +1,6 @@
 {
   "name": "typeorm-cloud-sync",
-  "version": "1.0.24",
+  "version": "1.0.26",
   "description": "Sync Sqlite data to Firebase Firestore",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
