@@ -7,6 +7,7 @@ import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Su
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
 import {getManager} from 'typeorm';
+import {Meta} from '../models/meta.model';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -136,7 +137,7 @@ export abstract class CloudStore {
 
   // Logic of updating a StoreRecord in a transaction: bumps the changeId, sets record change timestamp, updates
   // metadata table etc...
-  public abstract updateStoreRecord(obj: StoreRecord): Promise<any>;
+  public abstract updateStoreRecord(obj: StoreRecord): Promise<StoreRecord>;
 
   // Delete an object in the cloud
   public abstract delete(obj: StoreRecord, fromDb: boolean): Promise<any>;
@@ -187,10 +188,12 @@ export abstract class CloudStore {
       if (record != null) {
         try {
           console.log('[updateCloudFromChangeLog] update store record');
-          await this.updateStoreRecord(record);
+          const newRecord = await this.updateStoreRecord(record);
           console.log('[updateCloudFromChangeLog] done, now remove change');
           await change.remove();
           console.log('[updateCloudFromChangeLog] done removing change');
+          await Meta.fromRecord(newRecord).save();
+          console.log('[updateCloudFromChangeLog] done updating meta with latest changeId');
         } catch (err) {
           console.warn(err);
         }

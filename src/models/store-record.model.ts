@@ -8,6 +8,7 @@ import {
   SaveOptions,
 } from 'typeorm';
 import { StoreChangeLog } from './store-change-log.model';
+import {Meta} from './meta.model';
 
 export abstract class StoreRecord extends BaseEntity {
   recordChangeTimestamp: Date = new Date();
@@ -41,15 +42,13 @@ export abstract class StoreRecord extends BaseEntity {
   }
 
   static async getLatestRecord(isPrivate: boolean) {
-    const isPrivateQuery = isPrivate ? 1 : 0;
-    return await this.createQueryBuilder(this.name)
-        .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
-        .orderBy('changeId', 'DESC').getOne();
+    const collection = Meta.collectionFromName(this.name, isPrivate);
+    return await Meta.findOne(collection);
   }
 
   static async getLatestChangeId(isPrivate: boolean): Promise<number> {
-    const latestObj = await this.getLatestRecord(isPrivate);
-    return latestObj ? latestObj.changeId : 0;
+    const latestMeta = await this.getLatestRecord(isPrivate);
+    return latestMeta ? latestMeta.changeId : 0;
   }
 
   static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {

@@ -64,7 +64,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     return setDoc(docRef, obj.raw(), { merge: true });
   }
 
-  public async updateStoreRecord(obj: StoreRecord) {
+  public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
     // console.log('[updateStoreRecord]', modelName);
@@ -103,11 +103,12 @@ export class CloudFirebaseFirestore extends CloudStore {
       // console.log('[updateStoreRecord] User', document.exists);
       if (!document.exists()) {
         console.log("[firestore-model] Update: document doesn't exist for this user, ", document);
-        return await setDoc(userDocRef, obj.raw());
+        await setDoc(userDocRef, obj.raw());
+        return obj;
         // throw new Error('Document doesn\'t exist for this user');
       }
       // console.log('[updateStoreRecord] about to run transaction');
-      return runTransaction(this.db, (transaction) =>
+      await runTransaction(this.db, (transaction) =>
         transaction.get(userDocRef).then((userDoc) => {
           console.log(
             '[updateStoreRecord, firestore-model] updating user',
@@ -128,19 +129,18 @@ export class CloudFirebaseFirestore extends CloudStore {
           }
           return obj;
         }),
-      )
-        .then((val) => {
-          // console.log(val);
-        })
-        .catch((err) => {
-          console.warn(err);
-        });
+      ).catch((err) => {
+        console.warn(err);
+        throw(err);
+      });
+
+      return obj;
     }
   }
 
-  public updatePublicStoreRecord(model: StoreRecord, metaDocRef: any, collectionRef: CollectionReference): Promise<any> {
+  public async updatePublicStoreRecord(model: StoreRecord, metaDocRef: any, collectionRef: CollectionReference): Promise<StoreRecord> {
     console.log('[updatePublicStoreRecord]', model);
-    return runTransaction(this.db, (transaction) =>
+    await runTransaction(this.db, (transaction) =>
       transaction.get(metaDocRef).then((metaDoc) => {
         let changeId = 0;
         if (metaDoc.exists()) {
@@ -161,16 +161,15 @@ export class CloudFirebaseFirestore extends CloudStore {
         }
         return model;
       }),
-    )
-      .then((val) => {
-        console.log('[updatePublicStoreRecord]', val);
-      })
-      .catch((err) => {
-        console.error(err);
-        console.warn(
-          "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
-        );
-      });
+    ).catch((err) => {
+      console.error(err);
+      console.warn(
+        "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
+      );
+      throw(err);
+    });
+
+    return model;
   }
 
   public async delete(obj: StoreRecord, fromDb: boolean = false) {
@@ -288,7 +287,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
       }
     });
-    console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}`, records[0], records[1], records);
+    console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`, records[0], records[1], records);
     await this.resolveRecords(obj, records);
   }
 
