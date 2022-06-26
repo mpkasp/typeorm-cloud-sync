@@ -33,7 +33,7 @@ import QuerySnapshot = firebase.firestore.QuerySnapshot;
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
-  private firestoreUnsubscribes: Unsubscribe[] = [];
+  private firestoreSubscriptions: { [key: string]: FirestoreSubscription } = {};
 
   constructor(
     protected UserModel: typeof BaseUser,
@@ -233,8 +233,31 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected unsubscribePrivateCloud() {
     this.privateCloudInitialized = false;
-    this.firestoreUnsubscribes.forEach((unsubscribe) => unsubscribe());
-    this.firestoreUnsubscribes = [];
+    Object.entries(this.firestoreSubscriptions).forEach(([_, fs]) => fs.unsubscribe());
+    this.firestoreSubscriptions = {};
+  ;
+  }
+
+  protected async subscribeRecord(record: typeof StoreRecord, isPrivate: boolean): Promise<any> {
+    console.log('[subscribeRecord]', record.constructor.name);
+    if (!this.firestoreSubscriptions.hasOwnProperty(record.constructor.name)) {
+      console.log('[subscribeRecord] subscribing');
+      await this.subscribeObj(record.constructor, isPrivate);
+      // console.log('[subscribeRecord] done subscribing');
+    } else {
+      console.warn('Already subscribed', record);
+    }
+  }
+
+  protected unsubscribeRecord(record: typeof StoreRecord): any {
+    const recordName = record.constructor.name;
+    console.log('[unsubscribeRecord]', record.constructor.name);
+    if (this.firestoreSubscriptions.hasOwnProperty(recordName)) {
+      this.firestoreSubscriptions[recordName].unsubscribe();
+      delete this.firestoreSubscriptions[recordName];
+    } else {
+      console.warn('Trying to unsubscribe from a subscription that doesnt exist', record);
+    }
   }
 
   // Done implementing CloudStore, now helper functions:
@@ -244,7 +267,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, obj, isPrivate, collectionPath, latestChangeId);
+    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, latestChangeId);
     return new Promise<void>(async (resolve) => {
       let unresolved = true;
       const collectionRef = collection(this.db, collectionPath);
@@ -275,7 +298,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         }
       });
 
-      this.firestoreUnsubscribes.push(unsubscribe);
+      this.firestoreSubscriptions[objInstance.constructor.name] = {record: obj, unsubscribe};
     });
   }
 
@@ -344,7 +367,12 @@ export class CloudFirebaseFirestore extends CloudStore {
           unresolved = false;
         }
       });
-      this.firestoreUnsubscribes.push(unsubscribe);
+      this.firestoreSubscriptions['User'] = {record: BaseUser, unsubscribe};
     });
   }
+}
+
+interface FirestoreSubscription {
+  unsubscribe: Unsubscribe;
+  record: typeof StoreRecord;
 }

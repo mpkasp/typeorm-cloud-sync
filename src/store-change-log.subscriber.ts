@@ -1,5 +1,5 @@
 // tslint:disable: no-console
-import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent} from 'typeorm';
+import {EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, TransactionCommitEvent} from 'typeorm';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
@@ -11,12 +11,18 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
     return StoreChangeLog;
   }
 
+  afterInsert(event: InsertEvent<StoreChangeLog>): Promise<any> | void {
+    event.queryRunner.data = {'insert': true};
+  }
+
   afterTransactionCommit(event: TransactionCommitEvent): Promise<any> | void {
     if (this.cloud?.network) {
-      console.log('[StoreChangeLogSubscriber - afterTransactionCommit]', this.cloud.network, event);
-      return this.cloud.updateCloudFromChangeLog();
+      if (event.queryRunner.data.insert) {
+        event.queryRunner.data = {'insert': false};
+        return this.cloud.updateCloudFromChangeLog();
+      }
     } else {
-      console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
+      // console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
     }
   }
 }

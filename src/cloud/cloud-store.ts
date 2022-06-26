@@ -62,6 +62,8 @@ export abstract class CloudStore {
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
   private localStore: SqliteStore;
+  private updatingCloudFromChangeLog: boolean = false;
+  private queueUpdateCloudFromChangeLog: boolean = false;
 
   // Note: Must be able to construct object to set up observables immediately at app runtime. We separate out
   //   initialzation so that we can asynchronously set up the cloud app, sqlite store, etc..
@@ -154,6 +156,10 @@ export abstract class CloudStore {
 
   protected abstract unsubscribePrivateCloud(): any;
 
+  protected abstract subscribeRecord(recordName: typeof StoreRecord, isPrivate: boolean): Promise<any>;
+
+  protected abstract unsubscribeRecord(recordName: typeof StoreRecord): any;
+
   // No reason to unsubscribe from public cloud
 
   // *
@@ -179,6 +185,14 @@ export abstract class CloudStore {
       return;
     }
 
+    if (this.updatingCloudFromChangeLog) {
+      console.log('[updateCloudFromChangeLog] Still updating previous entry, queuing to run again.');
+      this.queueUpdateCloudFromChangeLog = true;
+      return;
+    }
+
+    this.updatingCloudFromChangeLog = true;
+    this.queueUpdateCloudFromChangeLog = false;
     const changes = await StoreChangeLog.find();
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
@@ -187,20 +201,34 @@ export abstract class CloudStore {
       console.log('[updateCloudFromChangeLog] record: ', record);
       if (record != null) {
         try {
+          console.log('[updateCloudFromChangeLog] stopping subscription');
+          this.unsubscribeRecord(record.constructor());
+
           console.log('[updateCloudFromChangeLog] update store record');
           const newRecord = await this.updateStoreRecord(record);
+
           console.log('[updateCloudFromChangeLog] done, now remove change');
           await change.remove();
+
+          console.log('[updateCloudFromChangeLog] save local record');
+          await newRecord.save( {listeners: false}, false);
+
+          console.log('[updateCloudFromChangeLog] starting subscription');
+          await this.subscribeRecord(record.constructor(), record.isPrivate); // TODO: This never seems to resolve
+
           console.log('[updateCloudFromChangeLog] done removing change');
-          await Meta.fromRecord(newRecord).save();
-          console.log('[updateCloudFromChangeLog] done updating meta with latest changeId');
         } catch (err) {
           console.warn(err);
         }
       } else {
-        console.log('[updateCloudFromChangeLog] Local record not found, deleting change', change);
+        console.log('[updateCloudFromChangeLog] Local record not found, deleting change');
         await change.remove();
       }
+    }
+
+    this.updatingCloudFromChangeLog = false;
+    if (this.queueUpdateCloudFromChangeLog) {
+      this.updateCloudFromChangeLog();
     }
   }
 

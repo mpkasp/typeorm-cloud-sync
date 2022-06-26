@@ -42,13 +42,15 @@ export abstract class StoreRecord extends BaseEntity {
   }
 
   static async getLatestRecord(isPrivate: boolean) {
-    const collection = Meta.collectionFromName(this.name, isPrivate);
-    return await Meta.findOne(collection);
+    const isPrivateQuery = isPrivate ? 1 : 0;
+    return await this.createQueryBuilder(this.name)
+        .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
+        .orderBy('changeId', 'DESC').getOne();
   }
 
   static async getLatestChangeId(isPrivate: boolean): Promise<number> {
-    const latestMeta = await this.getLatestRecord(isPrivate);
-    return latestMeta ? latestMeta.changeId : 0;
+    const latestObj = await this.getLatestRecord(isPrivate);
+    return latestObj ? latestObj.changeId : 0;
   }
 
   static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {
@@ -131,9 +133,9 @@ export abstract class StoreRecord extends BaseEntity {
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
     console.log('[save]', this, updateChangeLog, options);
     const savedRecord = await super.save(options);
-    console.log('[save] saved record', this, updateChangeLog, options, savedRecord);
+    console.log('[save] saved record');
     if (updateChangeLog) {
-      console.log('[save] saving store record, update change log:', updateChangeLog);
+      console.log('[save] saving store record, update change log.');
       // Removed await from update change log - this speeds things up in the ui nicely, but it may affect function. Be aware!
       await this.updateChangeLog();
       console.log('[save] saved change log');

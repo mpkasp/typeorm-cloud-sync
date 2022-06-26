@@ -26,6 +26,6 @@ export class Meta extends BaseEntity {
     }
 
     static collectionFromName(name: string, isPrivate: boolean) {
-        return isPrivate ? `User/${name}` : name;
+        return (isPrivate && (name !== 'User')) ? `User/${name}` : name;
     }
 }
