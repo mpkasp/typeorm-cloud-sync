@@ -2,7 +2,7 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import {DataSource} from 'typeorm';
+import { DataSource } from 'typeorm';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
@@ -36,6 +36,7 @@ export class SqliteStore {
         try {
           const record = await this.saveRecord(cloudRecord, false);
           const changeLogs = await StoreChangeLog.getFromRecord(localRecord);
+          // @ts-ignore
           await StoreChangeLog.remove(changeLogs);
           return record;
         } catch (e) {
@@ -66,11 +67,6 @@ export class SqliteStore {
   }
 
   public async dropPrivateRecords(recordName: typeof StoreRecord) {
-    return this.dataSource
-        .createQueryBuilder()
-        .delete()
-        .from(recordName)
-        .where("isPrivate = 1")
-        .execute();
+    return this.dataSource.createQueryBuilder().delete().from(recordName).where('isPrivate = 1').execute();
   }
 }

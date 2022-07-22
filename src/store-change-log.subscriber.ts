@@ -1,5 +1,5 @@
 // tslint:disable: no-console
-import {EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, TransactionCommitEvent} from 'typeorm';
+import { EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, TransactionCommitEvent } from 'typeorm';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
@@ -12,13 +12,13 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
   }
 
   afterInsert(event: InsertEvent<StoreChangeLog>): Promise<any> | void {
-    event.queryRunner.data = {'insert': true};
+    event.queryRunner.data = { insert: true };
   }
 
   afterTransactionCommit(event: TransactionCommitEvent): Promise<any> | void {
     if (this.cloud?.network) {
       if (event.queryRunner.data.insert) {
-        event.queryRunner.data = {'insert': false};
+        event.queryRunner.data = { insert: false };
         return this.cloud.updateCloudFromChangeLog();
       }
     } else {

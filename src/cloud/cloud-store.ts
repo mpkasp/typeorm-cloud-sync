@@ -74,7 +74,7 @@ export abstract class CloudStore {
 
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
-    const user = await this.UserModel.findOne({order: {changeId: 'DESC'}});
+    const user = await this.UserModel.findOne({ order: { changeId: 'DESC' } });
     // console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
@@ -107,7 +107,7 @@ export abstract class CloudStore {
         if (user?.authId) {
           console.log('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
           this.downloadingSubject.next(true);
-          this.subscribePrivateCloud().then(_ => {
+          this.subscribePrivateCloud().then((_) => {
             this.downloadingSubject.next(false);
           });
         } else {
@@ -192,6 +192,7 @@ export abstract class CloudStore {
 
     this.updatingCloudFromChangeLog = true;
     this.queueUpdateCloudFromChangeLog = false;
+    // @ts-ignore
     const changes = await StoreChangeLog.find();
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
@@ -210,7 +211,7 @@ export abstract class CloudStore {
           await change.remove();
 
           console.log('[updateCloudFromChangeLog] save local record');
-          await newRecord.save( {listeners: false}, false);
+          await newRecord.save({ listeners: false }, false);
 
           console.log('[updateCloudFromChangeLog] starting subscription');
           await this.subscribeRecord(record.constructor(), record.isPrivate); // TODO: This never seems to resolve
@@ -246,10 +247,12 @@ export abstract class CloudStore {
 
   // Helper to call proper resolve function when a new object is received from the cloud
   protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
+    // @ts-ignore
     const localChange = await StoreChangeLog.findOne({ where: { recordId: obj.id } });
     if (localChange) {
       // console.log('[resolveRecords] Local change, need to resolve!', this.localStore);
-      const localCopy = await recordType.findOneBy({id: obj.id});
+      // @ts-ignore
+      const localCopy = await recordType.findOneBy({ id: obj.id });
       return await this.localStore.resolve(obj, localCopy);
     } else {
       // console.log('[resolveRecords] No local change, resolving from cloud.', this.localStore);

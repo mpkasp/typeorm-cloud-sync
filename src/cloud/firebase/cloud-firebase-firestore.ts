@@ -135,14 +135,18 @@ export class CloudFirebaseFirestore extends CloudStore {
         }),
       ).catch((err) => {
         console.warn(err);
-        throw(err);
+        throw err;
       });
 
       return obj;
     }
   }
 
-  public async updatePublicStoreRecord(model: StoreRecord, metaDocRef: any, collectionRef: CollectionReference): Promise<StoreRecord> {
+  public async updatePublicStoreRecord(
+    model: StoreRecord,
+    metaDocRef: any,
+    collectionRef: CollectionReference,
+  ): Promise<StoreRecord> {
     console.log('[updatePublicStoreRecord]', model);
     await runTransaction(this.db, (transaction) =>
       transaction.get(metaDocRef).then((metaDoc) => {
@@ -170,7 +174,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       console.warn(
         "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
       );
-      throw(err);
+      throw err;
     });
 
     return model;
@@ -239,7 +243,6 @@ export class CloudFirebaseFirestore extends CloudStore {
     this.privateCloudInitialized = false;
     Object.entries(this.firestoreSubscriptions).forEach(([_, fs]) => fs.unsubscribe());
     this.firestoreSubscriptions = {};
-  ;
   }
 
   protected async subscribeRecord(record: typeof StoreRecord, isPrivate: boolean): Promise<any> {
@@ -276,18 +279,28 @@ export class CloudFirebaseFirestore extends CloudStore {
       let unresolved = true;
       const collectionRef = collection(this.db, collectionPath);
 
-      let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy("changeId"), limit(queryLimit));
+      let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy('changeId'), limit(queryLimit));
       let documentSnapshots = await getDocs(q);
-      console.log(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`);
+      console.log(
+        `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
+      );
       await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
 
       while (documentSnapshots.size === queryLimit) {
-        const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length-1]; // Get cursor
+        const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
         latestChangeId = await obj.getLatestChangeId(isPrivate);
-        q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy("changeId"), startAfter(lastVisible), limit(queryLimit));
+        q = query(
+          collectionRef,
+          where('changeId', '>', latestChangeId),
+          orderBy('changeId'),
+          startAfter(lastVisible),
+          limit(queryLimit),
+        );
 
         documentSnapshots = await getDocs(q);
-        console.log(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`);
+        console.log(
+          `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
+        );
         await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
       }
 
@@ -296,18 +309,24 @@ export class CloudFirebaseFirestore extends CloudStore {
         await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
         // TODO: Handle downloading status
         if (unresolved) {
-          console.log('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath, );
+          console.log('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
           resolve();
           unresolved = false;
         }
       });
 
-      this.firestoreSubscriptions[objInstance.constructor.name] = {record: obj, unsubscribe};
+      this.firestoreSubscriptions[objInstance.constructor.name] = { record: obj, unsubscribe };
     });
   }
 
   // TODO: Correct types here
-  private async resolveSnapshot(obj: any, snapshot: any, latestChangeId: number, isPrivate: boolean, collectionPath: string) {
+  private async resolveSnapshot(
+    obj: any,
+    snapshot: any,
+    latestChangeId: number,
+    isPrivate: boolean,
+    collectionPath: string,
+  ) {
     const records: StoreRecord[] = [];
     snapshot.docs.forEach((docRef: any) => {
       const d = docRef.data();
@@ -315,7 +334,12 @@ export class CloudFirebaseFirestore extends CloudStore {
       records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
       // }
     });
-    console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`, records[0], records[1], records);
+    console.log(
+      `[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`,
+      records[0],
+      records[1],
+      records,
+    );
     await this.resolveRecords(obj, records);
   }
 
@@ -377,7 +401,7 @@ export class CloudFirebaseFirestore extends CloudStore {
           unresolved = false;
         }
       });
-      this.firestoreSubscriptions['User'] = {record: BaseUser, unsubscribe};
+      this.firestoreSubscriptions['User'] = { record: BaseUser, unsubscribe };
     });
   }
 }
