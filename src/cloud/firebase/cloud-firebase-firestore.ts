@@ -97,6 +97,10 @@ export class CloudFirebaseFirestore extends CloudStore {
       // console.log('[updateStoreRecord] User');
       console.log('[updateStoreRecord] User Document: ', obj);
       const user = obj as BaseUser;
+      if (!user.authId) {
+        console.warn('Trying to update user object without an auth id', user);
+        return obj;
+      }
       // console.log('[updateStoreRecord] User Document: ', user, user?.authId);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
       const document = await getDoc(userDocRef);
@@ -302,13 +306,14 @@ export class CloudFirebaseFirestore extends CloudStore {
     });
   }
 
-  private async resolveSnapshot(obj, snapshot, latestChangeId: number, isPrivate: boolean, collectionPath: string) {
+  // TODO: Correct types here
+  private async resolveSnapshot(obj: any, snapshot: any, latestChangeId: number, isPrivate: boolean, collectionPath: string) {
     const records: StoreRecord[] = [];
-    snapshot.docs.forEach((docRef) => {
+    snapshot.docs.forEach((docRef: any) => {
       const d = docRef.data();
-      if (d.changeId > latestChangeId) {
-        records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
-      }
+      // if (d.changeId > latestChangeId) {
+      records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
+      // }
     });
     console.log(`[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`, records[0], records[1], records);
     await this.resolveRecords(obj, records);
@@ -333,10 +338,10 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   // User for private data
-  private userDocument(authId?: string): string {
+  private userDocument(authId?: string | null): string {
     // console.log('[userDocument] ', this.user);
     if (!authId) {
-      authId = this.user.authId;
+      authId = this.user?.authId;
     }
     if (authId) {
       return `/User/${authId}`;
@@ -348,6 +353,11 @@ export class CloudFirebaseFirestore extends CloudStore {
     console.log('[CloudFirebaseFirestore - subscribeCloudUser] 1');
     // const docPath = `${this.userDocument()}`;
     // console.log('[subscribeCloudUser] 2', this.db, docPath);
+    if (!this.user?.authId) {
+      console.warn('Cant subscribe, no authId on user');
+      return;
+    }
+
     const docRef = doc(this.db, 'User', this.user.authId);
     // console.log('[subscribeCloudUser] 3', docRef);
     // For the user, since we don't use a standard UUID, for now we're just going to always update from cloud

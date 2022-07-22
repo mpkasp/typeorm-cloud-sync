@@ -3,11 +3,9 @@ import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
 
-import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, startWith, Subscription } from 'rxjs';
+import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
-import {getManager} from 'typeorm';
-import {Meta} from '../models/meta.model';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -39,7 +37,8 @@ import {Meta} from '../models/meta.model';
 // else subscribe
 
 export abstract class CloudStore {
-  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
+  // @ts-ignore
+  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(global.navigator.onLine);
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean {
     return this.networkSubject.getValue();
@@ -75,7 +74,7 @@ export abstract class CloudStore {
 
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
-    const user = await this.UserModel.findOne();
+    const user = await this.UserModel.findOne({order: {changeId: 'DESC'}});
     // console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
@@ -90,9 +89,9 @@ export abstract class CloudStore {
 
   private subscribeNetwork() {
     const networkObservable = merge(
-      of(navigator.onLine),
-      fromEvent(window, 'online').pipe(mapTo(true)),
-      fromEvent(window, 'offline').pipe(mapTo(false)),
+      of(global.navigator.onLine),
+      fromEvent(global.window, 'online').pipe(mapTo(true)),
+      fromEvent(global.window, 'offline').pipe(mapTo(false)),
     );
     networkObservable.subscribe(this.networkSubject);
     this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
@@ -197,7 +196,7 @@ export abstract class CloudStore {
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
       console.log('[updateCloudFromChangeLog], ', change);
-      const record = await change.getRecord(this.localStore.connection);
+      const record = await change.getRecord(this.localStore.dataSource);
       console.log('[updateCloudFromChangeLog] record: ', record);
       if (record != null) {
         try {
@@ -234,10 +233,13 @@ export abstract class CloudStore {
 
   // Resolve a list of records
   protected async resolveRecords(recordType: typeof StoreRecord, objs: StoreRecord[]) {
-    const resolvedRecords = [];
+    const resolvedRecords: StoreRecord[] = [];
     for (const obj of objs) {
       // Only need to resolve issues if there's also a local change pending...
-      resolvedRecords.push(await this.resolveRecord(recordType, obj));
+      const resolvedRecord = await this.resolveRecord(recordType, obj);
+      if (resolvedRecord !== null) {
+        resolvedRecords.push(resolvedRecord);
+      }
     }
     return resolvedRecords;
   }
@@ -247,7 +249,7 @@ export abstract class CloudStore {
     const localChange = await StoreChangeLog.findOne({ where: { recordId: obj.id } });
     if (localChange) {
       // console.log('[resolveRecords] Local change, need to resolve!', this.localStore);
-      const localCopy = await recordType.findOne(obj.id);
+      const localCopy = await recordType.findOneBy({id: obj.id});
       return await this.localStore.resolve(obj, localCopy);
     } else {
       // console.log('[resolveRecords] No local change, resolving from cloud.', this.localStore);

@@ -4,7 +4,7 @@ import { Column, Entity } from 'typeorm';
 @Entity({ name: 'user' })
 export class BaseUser extends StoreRecord {
   @Column({ nullable: true })
-  public authId?: string | null = null;
+  public authId?: string | null;
 
   @Column({ nullable: true })
   public email?: string;

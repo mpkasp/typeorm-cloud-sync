@@ -1,4 +1,4 @@
-import {AfterInsert, BaseEntity, Column, Connection, Entity, EntityManager, PrimaryGeneratedColumn} from 'typeorm';
+import { BaseEntity, Column, DataSource, Entity, EntityManager, PrimaryGeneratedColumn} from 'typeorm';
 import { StoreRecord } from './store-record.model';
 
 @Entity({ name: 'storechangelog' })
@@ -27,11 +27,19 @@ export class StoreChangeLog extends BaseEntity {
     return StoreChangeLog.find({ where: { recordId: storeRecord.id, tableName: storeRecord.constructor.name } });
   }
 
-  public async getRecord(connection: Connection): Promise<StoreRecord> {
-    return (await connection.getRepository(this.tableName).findOne(this.recordId)) as StoreRecord;
+  public async getRecord(dataSource: DataSource): Promise<StoreRecord> {
+    return (await dataSource.getRepository(this.tableName).findOne({
+      where: {
+        recordId: this.recordId
+      }
+    })) as StoreRecord;
   }
 
   public async getRecordWithManager(manager: EntityManager): Promise<StoreRecord> {
-    return (await manager.getRepository(this.tableName).findOne(this.recordId)) as StoreRecord;
+    return (await manager.getRepository(this.tableName).findOne({
+      where: {
+        recordId: this.recordId
+      }
+    })) as StoreRecord;
   }
 }

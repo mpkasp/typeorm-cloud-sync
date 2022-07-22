@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "lib": ["es5", "es6", "dom"],
+    "lib": ["es5", "es6"],
     "outDir": "./lib",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "target": "es5",
+    "target": "ES2019",
     "module": "commonjs",
     "moduleResolution": "node",
     "importHelpers": true,
@@ -13,9 +13,10 @@
     "sourceMap": true,
     "declaration": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
     "stripInternal": true,
     "pretty": true,
-    "downlevelIteration": true
+    "downlevelIteration": true,
   },
   "include": ["src"],
   "exclude": ["node_modules", "**/__tests__/*"]

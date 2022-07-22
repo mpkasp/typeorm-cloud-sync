@@ -2,17 +2,17 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import {Connection, getConnection} from 'typeorm';
+import {DataSource} from 'typeorm';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
-  readonly connection: Connection;
+  readonly dataSource: DataSource;
 
-  constructor(connection: Connection, public UserModel: typeof BaseUser) {
-    this.connection = connection;
+  constructor(dataSource: DataSource, public UserModel: typeof BaseUser) {
+    this.dataSource = dataSource;
   }
 
-  public async resolve(cloudRecord: StoreRecord, localRecord?: StoreRecord): Promise<StoreRecord | null> {
+  public async resolve(cloudRecord: StoreRecord, localRecord?: StoreRecord | null): Promise<StoreRecord | null> {
     // console.log('[CloudSync - SqliteStore - resolve]', localRecord, cloudRecord);
     if (!localRecord) {
       console.log('[CloudSync - SqliteStore - resolve] no local record - need to update from cloud', cloudRecord);
@@ -62,11 +62,11 @@ export class SqliteStore {
   }
 
   public async dropPrivateTypeOrmCloudSyncRecords() {
-    await getConnection().createQueryBuilder().delete().from(StoreChangeLog).execute();
+    await this.dataSource.createQueryBuilder().delete().from(StoreChangeLog).execute();
   }
 
   public async dropPrivateRecords(recordName: typeof StoreRecord) {
-    return getConnection()
+    return this.dataSource
         .createQueryBuilder()
         .delete()
         .from(recordName)

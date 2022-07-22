@@ -1,9 +1,9 @@
 import {BaseUser, SqliteStore, StoreChangeLog} from '../index';
-import {ConnectionOptions, createConnection} from "typeorm";
+import {DataSource} from 'typeorm';
 
 // TODO: Write a test that checks if we can tell that a SpecialUser is typeof User in Cloud-firebase User functions
 
-const dbOptions: ConnectionOptions = {
+const dataSource: DataSource = new DataSource({
   name: 'default',
   type: 'sqlite',
   database: 'tests',
@@ -12,29 +12,30 @@ const dbOptions: ConnectionOptions = {
   synchronize: false,
   migrationsRun: true,
   entities: [BaseUser, StoreChangeLog, "./entities/*.ts"]
-};
+});
 
 let sqliteStore: SqliteStore;
 
 beforeEach(async () => {
-  const connection = await createConnection(dbOptions);
-  await connection.synchronize().catch(err => {
-    alert(`${err}`);
+  await dataSource.initialize();
+  await dataSource.synchronize().catch(err => {
+    console.error(err);
   });
   const UserModel = BaseUser;
-  sqliteStore = new SqliteStore(connection, UserModel);
+  sqliteStore = new SqliteStore(dataSource, UserModel);
 });
 
 afterEach(async () => {
-  await sqliteStore.connection.dropDatabase();
-  await sqliteStore.connection.close();
+  await sqliteStore.dataSource.dropDatabase();
+  await sqliteStore.dataSource.destroy();
 });
 
 test('Smoke', async () => {
-  expect(sqliteStore.connection.isConnected).toBe(true);
+  expect(sqliteStore.dataSource.isInitialized).toBe(true);
 });
 
 test('Test Save', async () => {
+  expect(sqliteStore.dataSource.isInitialized).toBe(true);
   let localRecord = await (new BaseUser({displayName: 'A Local Name', changeId: 1})).save();
   expect(localRecord.displayName).toBe('A Local Name');
 });

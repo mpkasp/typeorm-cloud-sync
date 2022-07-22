@@ -2,13 +2,12 @@ import {
   BaseEntity,
   BeforeInsert,
   BeforeUpdate,
-  Column, getManager, Index,
+  Column, Index,
   ObjectType,
   PrimaryGeneratedColumn,
   SaveOptions,
 } from 'typeorm';
 import { StoreChangeLog } from './store-change-log.model';
-import {Meta} from './meta.model';
 
 export abstract class StoreRecord extends BaseEntity {
   recordChangeTimestamp: Date = new Date();
@@ -43,13 +42,13 @@ export abstract class StoreRecord extends BaseEntity {
 
   static async getLatestRecord(isPrivate: boolean) {
     const isPrivateQuery = isPrivate ? 1 : 0;
-    return await this.createQueryBuilder(this.name)
+    return await BaseEntity.createQueryBuilder(this.name)
         .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
         .orderBy('changeId', 'DESC').getOne();
   }
 
   static async getLatestChangeId(isPrivate: boolean): Promise<number> {
-    const latestObj = await this.getLatestRecord(isPrivate);
+    const latestObj = (await this.getLatestRecord(isPrivate)) as StoreRecord;
     return latestObj ? latestObj.changeId : 0;
   }
 
@@ -117,9 +116,9 @@ export abstract class StoreRecord extends BaseEntity {
   }
 
   async updateChangeLog(): Promise<StoreChangeLog> {
-    const existingChangeLog = await StoreChangeLog.findOne({
-      where: { tableName: this.constructor.name, recordId: this.id },
-    });
+    const existingChangeLog = await StoreChangeLog.getRepository().findOneBy(
+        { tableName: this.constructor.name, recordId: this.id },
+    );
     // console.log(existingChangeLog);
     if (!existingChangeLog) {
       // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${this.constructor.name}, ${this.id}`);
