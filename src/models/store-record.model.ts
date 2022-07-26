@@ -2,7 +2,7 @@ import {
   BaseEntity,
   BeforeInsert,
   BeforeUpdate,
-  Column,
+  Column, DataSource,
   Index,
   ObjectType,
   PrimaryGeneratedColumn,
@@ -41,16 +41,16 @@ export abstract class StoreRecord extends BaseEntity {
     Object.assign(this, init);
   }
 
-  static async getLatestRecord(isPrivate: boolean) {
+  static async getLatestRecord(dataSource: DataSource, obj: typeof StoreRecord, isPrivate: boolean) {
     const isPrivateQuery = isPrivate ? 1 : 0;
-    return await BaseEntity.createQueryBuilder(this.name)
-      .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
-      .orderBy('changeId', 'DESC')
-      .getOne();
+    const query = dataSource.getRepository(obj).createQueryBuilder()
+        .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
+        .orderBy('changeId', 'DESC');
+    return await query.getOne();
   }
 
-  static async getLatestChangeId(isPrivate: boolean): Promise<number> {
-    const latestObj = (await this.getLatestRecord(isPrivate)) as StoreRecord;
+  static async getLatestChangeId(dataSource: DataSource, obj: typeof StoreRecord, isPrivate: boolean): Promise<number> {
+    const latestObj = (await this.getLatestRecord(dataSource, obj, isPrivate)) as StoreRecord;
     return latestObj ? latestObj.changeId : 0;
   }
 

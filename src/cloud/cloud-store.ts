@@ -57,10 +57,10 @@ export abstract class CloudStore {
   }
 
   protected privateCloudInitialized: boolean = false;
+  protected localStore: SqliteStore;
   private uploading: boolean = false;
   private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
-  private localStore: SqliteStore;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
 

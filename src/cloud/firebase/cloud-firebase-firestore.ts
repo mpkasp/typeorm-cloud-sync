@@ -269,9 +269,9 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate);
+    // console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate);
     const queryLimit = 500;
-    let latestChangeId = await obj.getLatestChangeId(isPrivate);
+    let latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -289,7 +289,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
       while (documentSnapshots.size === queryLimit) {
         const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
-        latestChangeId = await obj.getLatestChangeId(isPrivate);
+        latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
         q = query(
           collectionRef,
           where('changeId', '>', latestChangeId),
@@ -306,7 +306,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       }
 
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        latestChangeId = await obj.getLatestChangeId(isPrivate);
+        latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
         await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
         // TODO: Handle downloading status
         if (unresolved) {
