@@ -234,7 +234,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     for (const PrivateRecord of this.privateRecords) {
       console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
-      // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
+      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
     }
     this.privateCloudInitialized = true;
   }
@@ -269,6 +269,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
+    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate);
     const queryLimit = 500;
     let latestChangeId = await obj.getLatestChangeId(isPrivate);
     const objInstance = new obj();
