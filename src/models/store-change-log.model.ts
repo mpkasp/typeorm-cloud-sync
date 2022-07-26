@@ -31,16 +31,22 @@ export class StoreChangeLog extends BaseEntity {
   public async getRecord(dataSource: DataSource): Promise<StoreRecord> {
     return (await dataSource.getRepository(this.tableName).findOne({
       where: {
-        recordId: this.recordId,
+        id: this.recordId,
       },
+      order: {
+        changeId: 'DESC'
+      }
     })) as StoreRecord;
   }
 
   public async getRecordWithManager(manager: EntityManager): Promise<StoreRecord> {
     return (await manager.getRepository(this.tableName).findOne({
       where: {
-        recordId: this.recordId,
+        id: this.recordId,
       },
+      order: {
+        changeId: 'DESC'
+      }
     })) as StoreRecord;
   }
 }
