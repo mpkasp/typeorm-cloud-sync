@@ -75,9 +75,8 @@ export class CloudFirebaseFirestore extends CloudStore {
       const metaCollection = this.metaCollectionPath(obj);
       console.log('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
       const metaCollectionRef = collection(this.db, metaCollection);
-      // console.log('[updateStoreRecord] ', metaCollectionRef);
-      const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName), limit(1)));
 
+      const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName)));
       if (snapshot.empty) {
         const newId = uuid();
         const metaData = {
@@ -91,7 +90,23 @@ export class CloudFirebaseFirestore extends CloudStore {
         return this.updatePublicStoreRecord(obj, ref, baseCollection);
       }
 
-      const metaDocRef = snapshot.docs[0].ref;
+
+      let metaDoc = snapshot.docs[0];
+      if (snapshot.docs.length > 1) {
+        snapshot.docs.slice(1).forEach(doc => {
+          console.log('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.id, metaDoc.data(), doc.id, doc.data(), snapshot.docs);
+          if (metaDoc.data().changeId < doc.data().changeId) {
+            console.log('[updateStoreRecord] DELETING REF', metaDoc.id, metaDoc.data());
+            deleteDoc(metaDoc.ref);
+            metaDoc = doc;
+          } else {
+            console.log('[updateStoreRecord] DELETING REF', doc.id, doc.data());
+            deleteDoc(doc.ref);
+          }
+        });
+      }
+
+      let metaDocRef = metaDoc.ref;
       return this.updatePublicStoreRecord(obj, metaDocRef, baseCollection);
     } else {
       // console.log('[updateStoreRecord] User');
