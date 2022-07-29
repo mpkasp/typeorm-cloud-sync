@@ -1,5 +1,4 @@
-// tslint:disable: no-console
-import { EntitySubscriberInterface, EventSubscriber, InsertEvent, RemoveEvent, TransactionCommitEvent } from 'typeorm';
+import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent, UpdateEvent} from 'typeorm';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
@@ -12,14 +11,19 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
   }
 
   afterInsert(event: InsertEvent<StoreChangeLog>): Promise<any> | void {
+    // console.log('[StoreChangeLogSubscriber - afterInsert]', event.queryRunner.isTransactionActive, event);
     event.queryRunner.data = { StoreChangeLog: { insert: true }};
-    console.log('[StoreChangeLogSubscriber - InsertEvent]', event.queryRunner.isTransactionActive, event);
+  }
+
+  afterUpdate(event: UpdateEvent<StoreChangeLog>): Promise<any> | void {
+    // console.log('[StoreChangeLogSubscriber - afterUpdate]', event.queryRunner.isTransactionActive, event);
+    event.queryRunner.data = { StoreChangeLog: { update: true }};
   }
 
   afterTransactionCommit(event: TransactionCommitEvent): Promise<any> | void {
-    console.log('[StoreChangeLogSubscriber - afterTransactionCommit]', this.cloud, event);
+    // console.log('[StoreChangeLogSubscriber - afterTransactionCommit]', this.cloud, event);
     if (this.cloud?.network) {
-      if (event.queryRunner.data.StoreChangeLog.insert) {
+      if (event.queryRunner.data.StoreChangeLog?.insert || event.queryRunner.data.StoreChangeLog?.update) {
         event.queryRunner.data.StoreChangeLog.insert =  false;
         return this.cloud.updateCloudFromChangeLog();
       }

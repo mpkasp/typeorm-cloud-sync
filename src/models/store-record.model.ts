@@ -44,11 +44,9 @@ export abstract class StoreRecord extends BaseEntity {
 
   static async getLatestRecord(dataSource: DataSource, obj: EntityTarget<StoreRecord>, objectName: string, isPrivate: boolean) {
     const isPrivateQuery = isPrivate ? 1 : 0;
-    console.log('[getLatestRecord]', objectName, obj.constructor.name, obj, typeof obj);
     const query = dataSource.getRepository(obj).createQueryBuilder()
         .where(`${objectName}.isPrivate = ${isPrivateQuery}`)
         .orderBy('changeId', 'DESC');
-    console.log('[getLatestRecord]', query, obj, query.getSql());
     return await query.getOne();
   }
 
