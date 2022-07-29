@@ -12,17 +12,19 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
   }
 
   afterInsert(event: InsertEvent<StoreChangeLog>): Promise<any> | void {
-    event.queryRunner.data = { insert: true };
+    event.queryRunner.data = { StoreChangeLog: { insert: true }};
+    console.log('[StoreChangeLogSubscriber - InsertEvent]', event.queryRunner.isTransactionActive, event);
   }
 
   afterTransactionCommit(event: TransactionCommitEvent): Promise<any> | void {
+    console.log('[StoreChangeLogSubscriber - afterTransactionCommit]', this.cloud, event);
     if (this.cloud?.network) {
-      if (event.queryRunner.data.insert) {
-        event.queryRunner.data = { insert: false };
+      if (event.queryRunner.data.StoreChangeLog.insert) {
+        event.queryRunner.data.StoreChangeLog.insert =  false;
         return this.cloud.updateCloudFromChangeLog();
       }
     } else {
-      // console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
+      console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
     }
   }
 }

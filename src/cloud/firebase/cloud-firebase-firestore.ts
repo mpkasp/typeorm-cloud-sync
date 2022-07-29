@@ -68,7 +68,6 @@ export class CloudFirebaseFirestore extends CloudStore {
     console.log('[updateStoreRecord]', obj);
     const modelName = obj.constructor.name;
     // console.log('[updateStoreRecord]', modelName);
-
     if (modelName !== 'User') {
       const collectionPath = this.collectionPath(obj);
       const baseCollection = collection(this.db, collectionPath);
@@ -77,11 +76,16 @@ export class CloudFirebaseFirestore extends CloudStore {
       const metaCollectionRef = collection(this.db, metaCollection);
 
       const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName)));
+      console.log('[updateStoreRecord] got meta snapshot', snapshot);
       if (snapshot.empty) {
         const newId = uuid();
+        console.log('[updateStoreRecord] getting latest changeId');
+        let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, {type: obj, name: modelName}, modelName, obj.isPrivate);
+        console.log('[updateStoreRecord] change id doesnt exist, latest:', latestChangeId);
+
         const metaData = {
           collection: modelName,
-          changeId: 0,
+          changeId: latestChangeId,
           // size: 0,
         };
         const ref = doc(this.db, metaCollection, newId);
@@ -92,6 +96,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
 
       let metaDoc = snapshot.docs[0];
+      console.log('[updateStoreRecord] got metaDoc', snapshot, metaDoc);
       if (snapshot.docs.length > 1) {
         snapshot.docs.slice(1).forEach(doc => {
           console.log('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.id, metaDoc.data(), doc.id, doc.data(), snapshot.docs);
@@ -284,9 +289,10 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    // console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate);
+    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, obj.constructor.name, obj.name);
     const queryLimit = 500;
-    let latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+    const objectName = obj.name;
+    let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -304,7 +310,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
       while (documentSnapshots.size === queryLimit) {
         const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
-        latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+        latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
         q = query(
           collectionRef,
           where('changeId', '>', latestChangeId),
@@ -321,7 +327,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       }
 
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        latestChangeId = await obj.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+        latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
         await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
         // TODO: Handle downloading status
         if (unresolved) {

@@ -9,6 +9,7 @@ import {
   SaveOptions,
 } from 'typeorm';
 import { StoreChangeLog } from './store-change-log.model';
+import {EntityTarget} from 'typeorm/common/EntityTarget';
 
 export abstract class StoreRecord extends BaseEntity {
   recordChangeTimestamp: Date = new Date();
@@ -41,16 +42,18 @@ export abstract class StoreRecord extends BaseEntity {
     Object.assign(this, init);
   }
 
-  static async getLatestRecord(dataSource: DataSource, obj: typeof StoreRecord, isPrivate: boolean) {
+  static async getLatestRecord(dataSource: DataSource, obj: EntityTarget<StoreRecord>, objectName: string, isPrivate: boolean) {
     const isPrivateQuery = isPrivate ? 1 : 0;
+    console.log('[getLatestRecord]', objectName, obj.constructor.name, obj, typeof obj);
     const query = dataSource.getRepository(obj).createQueryBuilder()
-        .where(`${this.name}.isPrivate = ${isPrivateQuery}`)
+        .where(`${objectName}.isPrivate = ${isPrivateQuery}`)
         .orderBy('changeId', 'DESC');
+    console.log('[getLatestRecord]', query, obj, query.getSql());
     return await query.getOne();
   }
 
-  static async getLatestChangeId(dataSource: DataSource, obj: typeof StoreRecord, isPrivate: boolean): Promise<number> {
-    const latestObj = (await this.getLatestRecord(dataSource, obj, isPrivate)) as StoreRecord;
+  static async getLatestChangeId(dataSource: DataSource, obj: EntityTarget<StoreRecord>, objectName: string, isPrivate: boolean): Promise<number> {
+    const latestObj = (await this.getLatestRecord(dataSource, obj, objectName, isPrivate)) as StoreRecord;
     return latestObj ? latestObj.changeId : 0;
   }
 
