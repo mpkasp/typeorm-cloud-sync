@@ -6,7 +6,7 @@ import { BaseUser } from '../../models/base-user.model';
 
 import { v4 as uuid } from 'uuid';
 
-import { FirebaseApp } from '@firebase/app';
+import { FirebaseApp, initializeApp } from 'firebase/app';
 import {
   collection,
   doc,
@@ -26,10 +26,7 @@ import {
   runTransaction,
   CollectionReference,
   Unsubscribe,
-} from '@firebase/firestore';
-import firebase from 'firebase/compat';
-import DocumentSnapshot = firebase.firestore.DocumentSnapshot;
-import QuerySnapshot = firebase.firestore.QuerySnapshot;
+} from 'firebase/firestore';
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
@@ -121,17 +118,18 @@ export class CloudFirebaseFirestore extends CloudStore {
         console.warn('Trying to update user object without an auth id', user);
         return obj;
       }
-      // console.log('[updateStoreRecord] User Document: ', user, user?.authId);
+      console.log('[updateStoreRecord] User Document with valid id: ', user, user?.authId, this.db);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
+      console.log('[updateStoreRecord] got doc ref: ', userDocRef);
       const document = await getDoc(userDocRef);
-      // console.log('[updateStoreRecord] User', document.exists);
+      console.log('[updateStoreRecord] User', document.exists);
       if (!document.exists()) {
         console.log("[firestore-model] Update: document doesn't exist for this user, ", document);
         await setDoc(userDocRef, obj.raw());
         return obj;
         // throw new Error('Document doesn\'t exist for this user');
       }
-      // console.log('[updateStoreRecord] about to run transaction');
+      console.log('[updateStoreRecord] about to run transaction');
       await runTransaction(this.db, (transaction) =>
         transaction.get(userDocRef).then((userDoc) => {
           console.log(
