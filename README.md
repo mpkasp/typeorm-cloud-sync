@@ -38,3 +38,6 @@ connection.subscribers.push(new UserSubscriber(this.cloudStore));
 ```
 
 NOTES: Typeorm 0.3.20 doesn't work due to [this issue](https://github.com/capacitor-community/sqlite/issues/512#issuecomment-1925418022)
+
+# Developing
+Suggest using npm link so that node access source code directly

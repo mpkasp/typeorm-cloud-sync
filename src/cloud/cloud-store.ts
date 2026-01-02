@@ -4,7 +4,7 @@ import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
 
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of } from 'rxjs';
-import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
+// import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
 
 // Each store needs CRUD
@@ -59,7 +59,7 @@ export abstract class CloudStore {
   protected privateCloudInitialized: boolean = false;
   protected localStore: SqliteStore;
   private uploading: boolean = false;
-  private changeLogSubscriber = new StoreChangeLogSubscriber(this);
+  // private changeLogSubscriber = new StoreChangeLogSubscriber(this);
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
