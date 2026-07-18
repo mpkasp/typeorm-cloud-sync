@@ -1,6 +1,7 @@
 export { StoreChangeLog } from './models/store-change-log.model';
 export { StoreRecord } from './models/store-record.model';
 export { BaseUser } from './models/base-user.model';
+export { Meta } from './models/meta.model';
 
 export { SqliteStore } from './sqlite-store';
 

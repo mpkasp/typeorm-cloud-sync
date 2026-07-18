@@ -1,6 +1,6 @@
 // tslint:disable: no-console
 
-import { EntitySubscriberInterface, EventSubscriber, InsertEvent, UpdateEvent } from 'typeorm';
+import { EntitySubscriberInterface, EventSubscriber, InsertEvent, UpdateEvent } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
 import { CloudStore } from './cloud/cloud-store';
 

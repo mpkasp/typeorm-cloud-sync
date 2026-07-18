@@ -7,9 +7,9 @@ import {
   ObjectType,
   PrimaryGeneratedColumn,
   SaveOptions,
-} from 'typeorm';
+} from 'typeorm/browser';
 import { StoreChangeLog } from './store-change-log.model';
-import {EntityTarget} from 'typeorm/common/EntityTarget';
+import {EntityTarget} from 'typeorm/browser';
 
 export abstract class StoreRecord extends BaseEntity {
   recordChangeTimestamp: Date = new Date();

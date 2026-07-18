@@ -1,4 +1,4 @@
-import { BaseEntity, Column, DataSource, Entity, EntityManager, PrimaryGeneratedColumn } from 'typeorm';
+import { BaseEntity, Column, DataSource, Entity, EntityManager, PrimaryGeneratedColumn } from 'typeorm/browser';
 import { StoreRecord } from './store-record.model';
 
 @Entity({ name: 'storechangelog' })

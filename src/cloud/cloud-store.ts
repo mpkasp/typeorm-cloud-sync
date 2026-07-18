@@ -37,8 +37,7 @@ import { BaseUser } from '../models/base-user.model';
 // else subscribe
 
 export abstract class CloudStore {
-  // @ts-ignore
-  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(global.navigator.onLine);
+  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean {
     return this.networkSubject.getValue();
@@ -89,9 +88,9 @@ export abstract class CloudStore {
 
   private subscribeNetwork() {
     const networkObservable = merge(
-      of(global.navigator.onLine),
-      fromEvent(global.window, 'online').pipe(mapTo(true)),
-      fromEvent(global.window, 'offline').pipe(mapTo(false)),
+      of(navigator.onLine),
+      fromEvent(window, 'online').pipe(mapTo(true)),
+      fromEvent(window, 'offline').pipe(mapTo(false)),
     );
     networkObservable.subscribe(this.networkSubject);
     this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());

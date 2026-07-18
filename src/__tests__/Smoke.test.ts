@@ -1,33 +1,30 @@
 import { BaseUser, SqliteStore, StoreChangeLog } from '../index';
-import { DataSource } from 'typeorm';
+import { DataSource } from 'typeorm/browser';
+import initSqlJs from 'sql.js';
 
 // TODO: Write a test that checks if we can tell that a SpecialUser is typeof User in Cloud-firebase User functions
 
-const dataSource: DataSource = new DataSource({
-  name: 'default',
-  type: 'sqlite',
-  database: 'tests',
-  dropSchema: true,
-  logging: false,
-  synchronize: false,
-  migrationsRun: true,
-  entities: [BaseUser, StoreChangeLog, './entities/*.ts'],
-});
-
+// The package ships the TypeORM browser build (see typeorm-browser-build-gotcha), so tests use
+// the in-memory `sqljs` driver with an injected sql.js module rather than a Node driver.
+let dataSource: DataSource;
 let sqliteStore: SqliteStore;
 
 beforeEach(async () => {
-  await dataSource.initialize();
-  await dataSource.synchronize().catch((err) => {
-    console.error(err);
+  const SQL = await initSqlJs();
+  dataSource = new DataSource({
+    type: 'sqljs',
+    driver: SQL,
+    dropSchema: true,
+    logging: false,
+    synchronize: true,
+    entities: [BaseUser, StoreChangeLog],
   });
-  const UserModel = BaseUser;
-  sqliteStore = new SqliteStore(dataSource, UserModel);
+  await dataSource.initialize();
+  sqliteStore = new SqliteStore(dataSource, BaseUser);
 });
 
 afterEach(async () => {
-  await sqliteStore.dataSource.dropDatabase();
-  await sqliteStore.dataSource.destroy();
+  await dataSource.destroy();
 });
 
 test('Smoke', async () => {

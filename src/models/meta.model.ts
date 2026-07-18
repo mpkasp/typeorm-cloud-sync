@@ -1,4 +1,4 @@
-import { BaseEntity, Column, Entity, PrimaryColumn } from 'typeorm';
+import { BaseEntity, Column, Entity, PrimaryColumn } from 'typeorm/browser';
 import { StoreRecord } from './store-record.model';
 
 @Entity({ name: 'meta' })

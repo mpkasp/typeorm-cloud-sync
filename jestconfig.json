@@ -1,10 +1,11 @@
 {
   "transform": {
-    "^.+\\.(t|j)sx?$": "ts-jest"
+    "^.+\\.(t|j)sx?$": ["ts-jest", { "tsconfig": "tsconfig.spec.json" }]
   },
   "clearMocks": true,
   "maxWorkers": 1,
   "testEnvironment": "node",
+  "transformIgnorePatterns": ["node_modules/(?!(uuid)/)"],
   "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
   "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"]
 }

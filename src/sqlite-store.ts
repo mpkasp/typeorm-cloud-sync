@@ -2,7 +2,7 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import { DataSource } from 'typeorm';
+import { DataSource } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
