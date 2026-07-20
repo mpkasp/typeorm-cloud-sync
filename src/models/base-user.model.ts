@@ -1,5 +1,5 @@
 import { StoreRecord } from './store-record.model';
-import { Column, Entity } from 'typeorm';
+import { Column, Entity } from 'typeorm/browser';
 
 @Entity({ name: 'user' })
 export class BaseUser extends StoreRecord {

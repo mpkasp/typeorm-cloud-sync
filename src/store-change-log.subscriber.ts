@@ -1,4 +1,4 @@
-import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent, UpdateEvent} from 'typeorm';
+import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent, UpdateEvent} from 'typeorm/browser';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
@@ -28,7 +28,7 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
         return this.cloud.updateCloudFromChangeLog();
       }
     } else {
-      console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
+      console.debug('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
     }
   }
 }

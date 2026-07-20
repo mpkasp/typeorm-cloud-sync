@@ -37,8 +37,7 @@ import { BaseUser } from '../models/base-user.model';
 // else subscribe
 
 export abstract class CloudStore {
-  // @ts-ignore
-  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(global.navigator.onLine);
+  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean {
     return this.networkSubject.getValue();
@@ -89,23 +88,23 @@ export abstract class CloudStore {
 
   private subscribeNetwork() {
     const networkObservable = merge(
-      of(global.navigator.onLine),
-      fromEvent(global.window, 'online').pipe(mapTo(true)),
-      fromEvent(global.window, 'offline').pipe(mapTo(false)),
+      of(navigator.onLine),
+      fromEvent(window, 'online').pipe(mapTo(true)),
+      fromEvent(window, 'offline').pipe(mapTo(false)),
     );
     networkObservable.subscribe(this.networkSubject);
     this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
   }
 
   private subscribeLocalUser() {
-    console.log('[CloudStore - subscribeLocalUser] setup.');
+    console.debug('[CloudStore - subscribeLocalUser] setup.');
     this.userSubject.subscribe((user) => {
       // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
       // This may mess with sign out logic... need to think...
-      console.log('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
+      console.debug('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
       if (this.lastUser?.authId !== user?.authId) {
         if (user?.authId) {
-          console.log('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
+          console.debug('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
           this.downloadingSubject.next(true);
           this.subscribePrivateCloud().then((_) => {
             this.downloadingSubject.next(false);
@@ -114,7 +113,7 @@ export abstract class CloudStore {
           this.unsubscribePrivateCloud();
         }
       } else {
-        console.log('[CloudStore - subscribeLocalUser] already subscribed');
+        console.debug('[CloudStore - subscribeLocalUser] already subscribed');
       }
 
       this.lastUser = user;
@@ -169,23 +168,23 @@ export abstract class CloudStore {
   //   the local DB may get 2 updates in a row and collide. To fix this we can consider populating a queue to update the DB
   public async updateCloudFromChangeLog() {
     if (!this.networkSubject.getValue()) {
-      console.warn('[updateCloudFromChangeLog] No network, not updating cloud.');
+      console.debug('[updateCloudFromChangeLog] No network, not updating cloud.');
       return;
     }
 
     // Don't updateCloud until cloud subscriptions are set up and we finish downloading
     if (!this.privateCloudInitialized) {
-      console.warn('[updateCloudFromChangeLog] Subscriptions not yet initialized, not updating cloud.');
+      console.debug('[updateCloudFromChangeLog] Subscriptions not yet initialized, not updating cloud.');
       return;
     }
 
     if (this.downloading) {
-      console.warn('[updateCloudFromChangeLog] Still downloading, not updating cloud.');
+      console.debug('[updateCloudFromChangeLog] Still downloading, not updating cloud.');
       return;
     }
 
     if (this.updatingCloudFromChangeLog) {
-      console.log('[updateCloudFromChangeLog] Still updating previous entry, queuing to run again.');
+      console.debug('[updateCloudFromChangeLog] Still updating previous entry, queuing to run again.');
       this.queueUpdateCloudFromChangeLog = true;
       return;
     }
@@ -196,32 +195,32 @@ export abstract class CloudStore {
     const changes = await StoreChangeLog.find();
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
-      console.log('[updateCloudFromChangeLog], ', change);
+      console.debug('[updateCloudFromChangeLog], ', change);
       const record = await change.getRecord(this.localStore.dataSource);
-      console.log('[updateCloudFromChangeLog] record: ', record);
+      console.debug('[updateCloudFromChangeLog] record: ', record);
       if (record != null) {
         try {
-          console.log('[updateCloudFromChangeLog] stopping subscription');
+          console.debug('[updateCloudFromChangeLog] stopping subscription');
           this.unsubscribeRecord(record.constructor());
 
-          console.log('[updateCloudFromChangeLog] update store record');
+          console.debug('[updateCloudFromChangeLog] update store record');
           const newRecord = await this.updateStoreRecord(record);
 
-          console.log('[updateCloudFromChangeLog] done, now remove change');
+          console.debug('[updateCloudFromChangeLog] done, now remove change');
           await change.remove();
 
-          console.log('[updateCloudFromChangeLog] save local record');
+          console.debug('[updateCloudFromChangeLog] save local record');
           await newRecord.save({ listeners: false }, false);
 
-          console.log('[updateCloudFromChangeLog] starting subscription');
+          console.debug('[updateCloudFromChangeLog] starting subscription');
           await this.subscribeRecord(record.constructor(), record.isPrivate); // TODO: This never seems to resolve
 
-          console.log('[updateCloudFromChangeLog] done removing change');
+          console.debug('[updateCloudFromChangeLog] done removing change');
         } catch (err) {
           console.warn(err);
         }
       } else {
-        console.log('[updateCloudFromChangeLog] Local record not found, deleting change');
+        console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
         await change.remove();
       }
     }

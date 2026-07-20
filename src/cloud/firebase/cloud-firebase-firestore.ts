@@ -3,6 +3,7 @@ import { CloudStore } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
+import { storeNameOf } from '../../models/store-name';
 
 import { v4 as uuid } from 'uuid';
 
@@ -62,23 +63,23 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
-    console.log('[updateStoreRecord]', obj);
-    const modelName = obj.constructor.name;
+    console.debug('[updateStoreRecord]', obj);
+    const modelName = storeNameOf(obj);
     // console.log('[updateStoreRecord]', modelName);
     if (modelName !== 'User') {
       const collectionPath = this.collectionPath(obj);
       const baseCollection = collection(this.db, collectionPath);
       const metaCollection = this.metaCollectionPath(obj);
-      console.log('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
+      console.debug('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
       const metaCollectionRef = collection(this.db, metaCollection);
 
       const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName)));
-      console.log('[updateStoreRecord] got meta snapshot', snapshot);
+      console.debug('[updateStoreRecord] got meta snapshot', snapshot);
       if (snapshot.empty) {
         const newId = uuid();
-        console.log('[updateStoreRecord] getting latest changeId');
+        console.debug('[updateStoreRecord] getting latest changeId');
         let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, {type: obj, name: modelName}, modelName, obj.isPrivate);
-        console.log('[updateStoreRecord] change id doesnt exist, latest:', latestChangeId);
+        console.debug('[updateStoreRecord] change id doesnt exist, latest:', latestChangeId);
 
         const metaData = {
           collection: modelName,
@@ -93,16 +94,16 @@ export class CloudFirebaseFirestore extends CloudStore {
 
 
       let metaDoc = snapshot.docs[0];
-      console.log('[updateStoreRecord] got metaDoc', snapshot, metaDoc);
+      console.debug('[updateStoreRecord] got metaDoc', snapshot, metaDoc);
       if (snapshot.docs.length > 1) {
         snapshot.docs.slice(1).forEach(doc => {
-          console.log('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.id, metaDoc.data(), doc.id, doc.data(), snapshot.docs);
+          console.warn('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.id, metaDoc.data(), doc.id, doc.data(), snapshot.docs);
           if (metaDoc.data().changeId < doc.data().changeId) {
-            console.log('[updateStoreRecord] DELETING REF', metaDoc.id, metaDoc.data());
+            console.debug('[updateStoreRecord] DELETING REF', metaDoc.id, metaDoc.data());
             deleteDoc(metaDoc.ref);
             metaDoc = doc;
           } else {
-            console.log('[updateStoreRecord] DELETING REF', doc.id, doc.data());
+            console.debug('[updateStoreRecord] DELETING REF', doc.id, doc.data());
             deleteDoc(doc.ref);
           }
         });
@@ -112,27 +113,27 @@ export class CloudFirebaseFirestore extends CloudStore {
       return this.updatePublicStoreRecord(obj, metaDocRef, baseCollection);
     } else {
       // console.log('[updateStoreRecord] User');
-      console.log('[updateStoreRecord] User Document: ', obj);
+      console.debug('[updateStoreRecord] User Document: ', obj);
       const user = obj as BaseUser;
       if (!user.authId) {
         console.warn('Trying to update user object without an auth id', user);
         return obj;
       }
-      console.log('[updateStoreRecord] User Document with valid id: ', user, user?.authId, this.db);
+      console.debug('[updateStoreRecord] User Document with valid id: ', user, user?.authId, this.db);
       const userDocRef = doc(this.db, this.userDocument(user.authId));
-      console.log('[updateStoreRecord] got doc ref: ', userDocRef);
+      console.debug('[updateStoreRecord] got doc ref: ', userDocRef);
       const document = await getDoc(userDocRef);
-      console.log('[updateStoreRecord] User', document.exists);
+      console.debug('[updateStoreRecord] User', document.exists);
       if (!document.exists()) {
-        console.log("[firestore-model] Update: document doesn't exist for this user, ", document);
+        console.debug("[firestore-model] Update: document doesn't exist for this user, ", document);
         await setDoc(userDocRef, obj.raw());
         return obj;
         // throw new Error('Document doesn\'t exist for this user');
       }
-      console.log('[updateStoreRecord] about to run transaction');
+      console.debug('[updateStoreRecord] about to run transaction');
       await runTransaction(this.db, (transaction) =>
         transaction.get(userDocRef).then((userDoc) => {
-          console.log(
+          console.debug(
             '[updateStoreRecord, firestore-model] updating user',
             document.data(),
             userDoc,
@@ -165,7 +166,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     metaDocRef: any,
     collectionRef: CollectionReference,
   ): Promise<StoreRecord> {
-    console.log('[updatePublicStoreRecord]', model);
+    console.debug('[updatePublicStoreRecord]', model);
     await runTransaction(this.db, (transaction) =>
       transaction.get(metaDocRef).then((metaDoc) => {
         let changeId = 0;
@@ -232,7 +233,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribePublicCloud() {
     // console.log('[CloudFirebaseFirestore - subscribePublicCloud] subscribing to public records!');
     for (const PublicRecord of this.publicRecords) {
-      console.log('[CloudFirebaseFirestore - subscribePublicCloud]', PublicRecord.name);
+      console.debug('[CloudFirebaseFirestore - subscribePublicCloud]', PublicRecord.name);
       await this.subscribeObj(PublicRecord, false);
       // console.log('[CloudFirebaseFirestore - subscribePublicCloud] done', PublicRecord.name);
     }
@@ -241,18 +242,18 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribePrivateCloud() {
     // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to private records!');
     if (this.privateCloudInitialized) {
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] already initialized');
+      console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] already initialized');
       return;
     }
-    console.log('[CloudFirebaseFirestore - subscribePrivateCloud] User');
+    console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
     // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done User');
     // for (let i = 0; i < this.privateRecords.length; i++) {
     //   const PrivateRecord = this.privateRecords[i];
     for (const PrivateRecord of this.privateRecords) {
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
+      console.debug('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
       await this.subscribeObj(PrivateRecord, true);
-      console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
+      console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
     }
     this.privateCloudInitialized = true;
   }
@@ -264,9 +265,9 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribeRecord(record: typeof StoreRecord, isPrivate: boolean): Promise<any> {
-    console.log('[subscribeRecord]', record.constructor.name);
-    if (!this.firestoreSubscriptions.hasOwnProperty(record.constructor.name)) {
-      console.log('[subscribeRecord] subscribing');
+    console.debug('[subscribeRecord]', storeNameOf(record));
+    if (!this.firestoreSubscriptions.hasOwnProperty(storeNameOf(record))) {
+      console.debug('[subscribeRecord] subscribing');
       await this.subscribeObj(record.constructor, isPrivate);
       // console.log('[subscribeRecord] done subscribing');
     } else {
@@ -275,8 +276,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected unsubscribeRecord(record: typeof StoreRecord): any {
-    const recordName = record.constructor.name;
-    console.log('[unsubscribeRecord]', record.constructor.name);
+    const recordName = storeNameOf(record);
+    console.debug('[unsubscribeRecord]', recordName);
     if (this.firestoreSubscriptions.hasOwnProperty(recordName)) {
       this.firestoreSubscriptions[recordName].unsubscribe();
       delete this.firestoreSubscriptions[recordName];
@@ -287,21 +288,21 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, obj.constructor.name, obj.name);
+    console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
     const objectName = obj.name;
     let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    console.log('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, latestChangeId);
+    console.debug('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, latestChangeId);
     return new Promise<void>(async (resolve) => {
       let unresolved = true;
       const collectionRef = collection(this.db, collectionPath);
 
       let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy('changeId'), limit(queryLimit));
       let documentSnapshots = await getDocs(q);
-      console.log(
+      console.debug(
         `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
       );
       await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
@@ -318,7 +319,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         );
 
         documentSnapshots = await getDocs(q);
-        console.log(
+        console.debug(
           `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
         );
         await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
@@ -329,13 +330,13 @@ export class CloudFirebaseFirestore extends CloudStore {
         await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
         // TODO: Handle downloading status
         if (unresolved) {
-          console.log('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
+          console.debug('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
           resolve();
           unresolved = false;
         }
       });
 
-      this.firestoreSubscriptions[objInstance.constructor.name] = { record: obj, unsubscribe };
+      this.firestoreSubscriptions[storeNameOf(objInstance)] = { record: obj, unsubscribe };
     });
   }
 
@@ -354,7 +355,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
       // }
     });
-    console.log(
+    console.debug(
       `[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`,
       records[0],
       records[1],
@@ -365,9 +366,9 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   private collectionPath(obj: StoreRecord): string {
     if (!obj.isPrivate) {
-      return `${obj.constructor.name}`;
+      return `${storeNameOf(obj)}`;
     }
-    return `${this.userDocument()}/${obj.constructor.name}`;
+    return `${this.userDocument()}/${storeNameOf(obj)}`;
   }
 
   private metaCollectionPath(obj: StoreRecord): string {
@@ -378,7 +379,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private documentPath(obj: StoreRecord): string {
-    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
+    return storeNameOf(obj) === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
   }
 
   // User for private data
@@ -394,7 +395,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private async subscribeCloudUser() {
-    console.log('[CloudFirebaseFirestore - subscribeCloudUser] 1');
+    console.debug('[CloudFirebaseFirestore - subscribeCloudUser] 1');
     // const docPath = `${this.userDocument()}`;
     // console.log('[subscribeCloudUser] 2', this.db, docPath);
     if (!this.user?.authId) {
@@ -412,7 +413,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         const data = this.deserialize(snapshot.data(), snapshot.id, true);
         delete data.id; // Only do this on user...
         const currentUser = this.user;
-        console.log('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
+        console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
         const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
         await updatedUser.save({}, false);
 

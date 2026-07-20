@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    "allowJs": true,
+    // The package is `type: module` (ESM) for bundler consumers, but Jest runs
+    // via ts-jest in CommonJS. Emit CJS for tests so the runner stays on its
+    // default (non-experimental) module system.
+    "module": "commonjs",
+    "moduleResolution": "node"
+  },
+  "include": ["src/**/*.ts"]
+}
