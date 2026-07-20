@@ -28,7 +28,7 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
         return this.cloud.updateCloudFromChangeLog();
       }
     } else {
-      console.log('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
+      console.debug('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
     }
   }
 }

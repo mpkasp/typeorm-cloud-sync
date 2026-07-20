@@ -15,7 +15,7 @@ export class SqliteStore {
   public async resolve(cloudRecord: StoreRecord, localRecord?: StoreRecord | null): Promise<StoreRecord | null> {
     // console.log('[CloudSync - SqliteStore - resolve]', localRecord, cloudRecord);
     if (!localRecord) {
-      console.log('[CloudSync - SqliteStore - resolve] no local record - need to update from cloud', cloudRecord);
+      console.debug('[CloudSync - SqliteStore - resolve] no local record - need to update from cloud', cloudRecord);
       try {
         return await this.saveRecord(cloudRecord, false);
       } catch (e) {
@@ -28,7 +28,7 @@ export class SqliteStore {
       // console.log(localTime, cloudTime);
       if (cloudTime >= localTime) {
         // server record is newer - use the server record
-        console.log(
+        console.debug(
           '[CloudSync - SqliteStore - resolve] server record is newer - use the server record',
           localRecord,
           cloudRecord,
@@ -45,7 +45,7 @@ export class SqliteStore {
         }
       } else {
         // local record is newer - use the local record
-        console.log(
+        console.debug(
           '[CloudSync - SqliteStore - resolve] local record is newer - use the local record',
           localRecord,
           cloudRecord,
