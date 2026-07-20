@@ -3,6 +3,7 @@ import { CloudStore } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
+import { storeNameOf } from '../../models/store-name';
 
 import { v4 as uuid } from 'uuid';
 
@@ -63,7 +64,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
     console.log('[updateStoreRecord]', obj);
-    const modelName = obj.constructor.name;
+    const modelName = storeNameOf(obj);
     // console.log('[updateStoreRecord]', modelName);
     if (modelName !== 'User') {
       const collectionPath = this.collectionPath(obj);
@@ -264,8 +265,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected async subscribeRecord(record: typeof StoreRecord, isPrivate: boolean): Promise<any> {
-    console.log('[subscribeRecord]', record.constructor.name);
-    if (!this.firestoreSubscriptions.hasOwnProperty(record.constructor.name)) {
+    console.log('[subscribeRecord]', storeNameOf(record));
+    if (!this.firestoreSubscriptions.hasOwnProperty(storeNameOf(record))) {
       console.log('[subscribeRecord] subscribing');
       await this.subscribeObj(record.constructor, isPrivate);
       // console.log('[subscribeRecord] done subscribing');
@@ -275,8 +276,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   protected unsubscribeRecord(record: typeof StoreRecord): any {
-    const recordName = record.constructor.name;
-    console.log('[unsubscribeRecord]', record.constructor.name);
+    const recordName = storeNameOf(record);
+    console.log('[unsubscribeRecord]', recordName);
     if (this.firestoreSubscriptions.hasOwnProperty(recordName)) {
       this.firestoreSubscriptions[recordName].unsubscribe();
       delete this.firestoreSubscriptions[recordName];
@@ -287,7 +288,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, obj.constructor.name, obj.name);
+    console.log('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
     const objectName = obj.name;
     let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
@@ -335,7 +336,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         }
       });
 
-      this.firestoreSubscriptions[objInstance.constructor.name] = { record: obj, unsubscribe };
+      this.firestoreSubscriptions[storeNameOf(objInstance)] = { record: obj, unsubscribe };
     });
   }
 
@@ -365,9 +366,9 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   private collectionPath(obj: StoreRecord): string {
     if (!obj.isPrivate) {
-      return `${obj.constructor.name}`;
+      return `${storeNameOf(obj)}`;
     }
-    return `${this.userDocument()}/${obj.constructor.name}`;
+    return `${this.userDocument()}/${storeNameOf(obj)}`;
   }
 
   private metaCollectionPath(obj: StoreRecord): string {
@@ -378,7 +379,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private documentPath(obj: StoreRecord): string {
-    return obj.constructor.name === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
+    return storeNameOf(obj) === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
   }
 
   // User for private data

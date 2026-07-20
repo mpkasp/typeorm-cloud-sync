@@ -10,8 +10,13 @@ import {
 } from 'typeorm/browser';
 import { StoreChangeLog } from './store-change-log.model';
 import {EntityTarget} from 'typeorm/browser';
+import { storeNameOf } from './store-name';
 
 export abstract class StoreRecord extends BaseEntity {
+  // Stable storage identity, immune to class-name mangling by bundlers.
+  // Concrete entities override this with a string literal (see storeNameOf).
+  static storeName?: string;
+
   recordChangeTimestamp: Date = new Date();
 
   @PrimaryGeneratedColumn('uuid')
@@ -121,13 +126,13 @@ export abstract class StoreRecord extends BaseEntity {
   async updateChangeLog(): Promise<StoreChangeLog> {
     // @ts-ignore
     const existingChangeLog = await StoreChangeLog.getRepository().findOneBy({
-      tableName: this.constructor.name,
+      tableName: storeNameOf(this),
       recordId: this.id,
     });
     // console.log(existingChangeLog);
     if (!existingChangeLog) {
-      // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${this.constructor.name}, ${this.id}`);
-      return await new StoreChangeLog(this.constructor.name, this.id!).save();
+      // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${storeNameOf(this)}, ${this.id}`);
+      return await new StoreChangeLog(storeNameOf(this), this.id!).save();
     } else {
       // console.log(`[updateChangeLog] change log exists, skipping making a new one ${this.constructor.name}, ${this.id}`);
     }
