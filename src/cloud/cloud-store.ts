@@ -201,7 +201,7 @@ export abstract class CloudStore {
       if (record != null) {
         try {
           console.debug('[updateCloudFromChangeLog] stopping subscription');
-          this.unsubscribeRecord(record.constructor());
+          this.unsubscribeRecord(record.constructor as typeof StoreRecord);
 
           console.debug('[updateCloudFromChangeLog] update store record');
           const newRecord = await this.updateStoreRecord(record);
@@ -213,7 +213,7 @@ export abstract class CloudStore {
           await newRecord.save({ listeners: false }, false);
 
           console.debug('[updateCloudFromChangeLog] starting subscription');
-          await this.subscribeRecord(record.constructor(), record.isPrivate); // TODO: This never seems to resolve
+          await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
 
           console.debug('[updateCloudFromChangeLog] done removing change');
         } catch (err) {
