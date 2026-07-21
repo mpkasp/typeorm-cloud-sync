@@ -268,8 +268,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     console.debug('[subscribeRecord]', storeNameOf(record));
     if (!this.firestoreSubscriptions.hasOwnProperty(storeNameOf(record))) {
       console.debug('[subscribeRecord] subscribing');
-      await this.subscribeObj(record.constructor, isPrivate);
-      // console.log('[subscribeRecord] done subscribing');
+      await this.subscribeObj(record, isPrivate);
     } else {
       console.warn('Already subscribed', record);
     }
