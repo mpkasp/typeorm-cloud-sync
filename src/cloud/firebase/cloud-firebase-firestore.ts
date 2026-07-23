@@ -4,8 +4,10 @@ import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
 import { storeNameOf } from '../../models/store-name';
-
-import { v4 as uuid } from 'uuid';
+import { PathBuilder } from '../protocol/path-builder';
+import { StoreRecordWriter } from '../protocol/store-record-writer';
+import { VersionedRecord } from '../protocol/firestore-port';
+import { WebFirestorePort } from './web-firestore-port';
 
 import { FirebaseApp, initializeApp } from 'firebase/app';
 import {
@@ -13,7 +15,6 @@ import {
   doc,
   addDoc,
   setDoc,
-  getDoc,
   getDocs,
   deleteDoc,
   onSnapshot,
@@ -24,14 +25,16 @@ import {
   limit,
   orderBy,
   startAfter,
-  runTransaction,
-  CollectionReference,
   Unsubscribe,
 } from 'firebase/firestore';
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
   private firestoreSubscriptions: { [key: string]: FirestoreSubscription } = {};
+  // Shared, SDK-agnostic versioned-write protocol (the same StoreRecordWriter a Cloud Function runs
+  // over an Admin-SDK port), bound here to the modular web SDK. See src/cloud/protocol.
+  private readonly paths = new PathBuilder(() => this.user?.authId);
+  private writer!: StoreRecordWriter;
 
   constructor(
     protected UserModel: typeof BaseUser,
@@ -46,6 +49,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     //   Could not reach Cloud Firestore backend. Connection failed 1 times. Most recent error: FirebaseError: [code=unknown]: Fetching auth token failed: Firebase: Error (auth/network-request-failed).
     //   This typically indicates that your device does not have a healthy Internet connection at the moment. The client will operate in offline mode until it is able to successfully connect to the backend.
     this.db = getFirestore(app); // Must be set before initializeBase so we can set up cloud subscriptions
+    this.writer = new StoreRecordWriter(new WebFirestorePort(this.db), this.paths);
     await this._initializeBase(sqliteStore);
   }
 
@@ -63,140 +67,20 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
-    console.debug('[updateStoreRecord]', obj);
-    const modelName = storeNameOf(obj);
-    // console.log('[updateStoreRecord]', modelName);
-    if (modelName !== 'User') {
-      const collectionPath = this.collectionPath(obj);
-      const baseCollection = collection(this.db, collectionPath);
-      const metaCollection = this.metaCollectionPath(obj);
-      console.debug('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
-      const metaCollectionRef = collection(this.db, metaCollection);
-
-      const snapshot = await getDocs(query(metaCollectionRef, where('collection', '==', modelName)));
-      console.debug('[updateStoreRecord] got meta snapshot', snapshot);
-      if (snapshot.empty) {
-        const newId = uuid();
-        console.debug('[updateStoreRecord] getting latest changeId');
-        let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, {type: obj, name: modelName}, modelName, obj.isPrivate);
-        console.debug('[updateStoreRecord] change id doesnt exist, latest:', latestChangeId);
-
-        const metaData = {
-          collection: modelName,
-          changeId: latestChangeId,
-          // size: 0,
-        };
-        const ref = doc(this.db, metaCollection, newId);
-        await setDoc(ref, metaData);
-        // console.log('[updateStoreRecord] about to update public store record');
-        return this.updatePublicStoreRecord(obj, ref, baseCollection);
-      }
-
-
-      let metaDoc = snapshot.docs[0];
-      console.debug('[updateStoreRecord] got metaDoc', snapshot, metaDoc);
-      if (snapshot.docs.length > 1) {
-        snapshot.docs.slice(1).forEach(doc => {
-          console.warn('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.id, metaDoc.data(), doc.id, doc.data(), snapshot.docs);
-          if (metaDoc.data().changeId < doc.data().changeId) {
-            console.debug('[updateStoreRecord] DELETING REF', metaDoc.id, metaDoc.data());
-            deleteDoc(metaDoc.ref);
-            metaDoc = doc;
-          } else {
-            console.debug('[updateStoreRecord] DELETING REF', doc.id, doc.data());
-            deleteDoc(doc.ref);
-          }
-        });
-      }
-
-      let metaDocRef = metaDoc.ref;
-      return this.updatePublicStoreRecord(obj, metaDocRef, baseCollection);
-    } else {
-      // console.log('[updateStoreRecord] User');
-      console.debug('[updateStoreRecord] User Document: ', obj);
-      const user = obj as BaseUser;
-      if (!user.authId) {
-        console.warn('Trying to update user object without an auth id', user);
-        return obj;
-      }
-      console.debug('[updateStoreRecord] User Document with valid id: ', user, user?.authId, this.db);
-      const userDocRef = doc(this.db, this.userDocument(user.authId));
-      console.debug('[updateStoreRecord] got doc ref: ', userDocRef);
-      const document = await getDoc(userDocRef);
-      console.debug('[updateStoreRecord] User', document.exists);
-      if (!document.exists()) {
-        console.debug("[firestore-model] Update: document doesn't exist for this user, ", document);
-        await setDoc(userDocRef, obj.raw());
-        return obj;
-        // throw new Error('Document doesn\'t exist for this user');
-      }
-      console.debug('[updateStoreRecord] about to run transaction');
-      await runTransaction(this.db, (transaction) =>
-        transaction.get(userDocRef).then((userDoc) => {
-          console.debug(
-            '[updateStoreRecord, firestore-model] updating user',
-            document.data(),
-            userDoc,
-            userDoc.data(),
-            obj,
-          );
-          let changeId = 0;
-          if (userDoc.exists()) {
-            changeId = userDoc.data().changeId + 1;
-            obj.changeId = changeId;
-            // const doc = db.doc(this.userDocument());
-            // set vs update: The set call on the other hand, will create or update the document as needed.
-            transaction.set(userDocRef, obj.raw(), { merge: true });
-          } else {
-            throw Error('Document does not exist!');
-          }
-          return obj;
-        }),
-      ).catch((err) => {
-        console.warn(err);
-        throw err;
-      });
-
-      return obj;
-    }
-  }
-
-  public async updatePublicStoreRecord(
-    model: StoreRecord,
-    metaDocRef: any,
-    collectionRef: CollectionReference,
-  ): Promise<StoreRecord> {
-    console.debug('[updatePublicStoreRecord]', model);
-    await runTransaction(this.db, (transaction) =>
-      transaction.get(metaDocRef).then((metaDoc) => {
-        let changeId = 0;
-        if (metaDoc.exists()) {
-          // console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data());
-          // @ts-ignore
-          changeId = metaDoc.data().changeId + 1;
-          model.changeId = changeId;
-          model.recordChangeTimestamp = new Date();
-          // console.log('[updatePublicStoreRecord] collectionRef.path: ', collectionRef.path);
-          const docRef = doc(this.db, collectionRef.path + '/' + model.id);
-          // const docRef = collectionRef.doc(model.id);
-          // console.log('[updatePublicStoreRecord]', model, model.raw());
-          // Need merge = true if we want to allow migrations since it uses the uid property
-          transaction.set(docRef, model.raw(), { merge: true });
-          transaction.update(metaDoc.ref, { changeId });
-        } else {
-          throw Error('Document does not exist!');
-        }
-        return model;
-      }),
-    ).catch((err) => {
-      console.error(err);
-      console.warn(
-        "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
-      );
-      throw err;
+    // Delegate to the shared, SDK-agnostic write protocol. `asVersioned` writes changeId /
+    // recordChangeTimestamp back onto `obj` (live accessors), so we return the same instance.
+    // `seedChangeId` supplies the local store's max changeId used when a collection's Meta doc is
+    // first created — the one piece the server can't provide (it seeds 0 instead).
+    await this.writer.writeRecord(this.asVersioned(obj), {
+      seedChangeId: () =>
+        StoreRecord.getLatestChangeId(
+          this.localStore.dataSource,
+          { type: obj as any, name: storeNameOf(obj) },
+          storeNameOf(obj),
+          obj.isPrivate,
+        ),
     });
-
-    return model;
+    return obj;
   }
 
   public async delete(obj: StoreRecord, fromDb: boolean = false) {
@@ -364,33 +248,40 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   private collectionPath(obj: StoreRecord): string {
-    if (!obj.isPrivate) {
-      return `${storeNameOf(obj)}`;
-    }
-    return `${this.userDocument()}/${storeNameOf(obj)}`;
-  }
-
-  private metaCollectionPath(obj: StoreRecord): string {
-    if (!obj.isPrivate) {
-      return `Meta`;
-    }
-    return doc(this.db, this.userDocument()).path + '/Meta';
+    return this.paths.collectionPath({ storeName: storeNameOf(obj), isPrivate: obj.isPrivate });
   }
 
   private documentPath(obj: StoreRecord): string {
-    return storeNameOf(obj) === 'User' ? this.userDocument() : `${this.collectionPath(obj)}/${obj.id}`;
+    return this.paths.documentPath({
+      storeName: storeNameOf(obj),
+      isPrivate: obj.isPrivate,
+      id: obj.id as string,
+      authId: (obj as any).authId,
+    });
   }
 
-  // User for private data
-  private userDocument(authId?: string | null): string {
-    // console.log('[userDocument] ', this.user);
-    if (!authId) {
-      authId = this.user?.authId;
-    }
-    if (authId) {
-      return `/User/${authId}`;
-    }
-    throw new Error('No cloud user found.');
+  // Adapt a StoreRecord to the protocol's minimal record view. changeId / recordChangeTimestamp are
+  // live accessors so the writer's mutations land back on the entity, and toBody() defers to raw().
+  private asVersioned(obj: StoreRecord): VersionedRecord {
+    return {
+      storeName: storeNameOf(obj),
+      id: obj.id as string,
+      isPrivate: obj.isPrivate,
+      authId: (obj as any).authId,
+      get changeId() {
+        return obj.changeId;
+      },
+      set changeId(v: number) {
+        obj.changeId = v;
+      },
+      get recordChangeTimestamp() {
+        return obj.recordChangeTimestamp;
+      },
+      set recordChangeTimestamp(v: Date) {
+        obj.recordChangeTimestamp = v;
+      },
+      toBody: () => obj.raw(),
+    };
   }
 
   private async subscribeCloudUser() {
