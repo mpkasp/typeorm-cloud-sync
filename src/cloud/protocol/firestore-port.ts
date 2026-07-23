@@ -36,7 +36,7 @@ export interface FirestorePort {
 // The minimal view of a record the protocol needs to version and write. Deliberately NOT
 // StoreRecord: the server has no access to the app's TypeORM entity classes, so the client adapts
 // its entity into this shape and the Cloud Function builds it straight from an inbox document.
-// `changeId` / `recordChangeTimestamp` are written back by the protocol before `toBody()` is read.
+// `changeId` / `recordChangeTimestamp` are written back by the protocol before `raw()` is read.
 export interface VersionedRecord {
   storeName: string; // stable storage name (already resolved via storeNameOf by the caller)
   id: string;
@@ -45,7 +45,7 @@ export interface VersionedRecord {
   authId?: string;
   changeId: number;
   recordChangeTimestamp: Date;
-  // The document body to persist (equivalent to StoreRecord.raw()); must reflect the current
-  // changeId / recordChangeTimestamp when called.
-  toBody(): Record<string, any>;
+  // The document body to persist — same contract as StoreRecord.raw() (strips id, drops undefined);
+  // must reflect the current changeId / recordChangeTimestamp when called.
+  raw(): Record<string, any>;
 }

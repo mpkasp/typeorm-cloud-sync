@@ -25,7 +25,7 @@ function record(init: {
     authId: init.authId,
     changeId: 0,
     recordChangeTimestamp: new Date(0),
-    toBody() {
+    raw() {
       return {
         ...(init.fields ?? {}),
         isPrivate: this.isPrivate,
@@ -41,7 +41,7 @@ describe('StoreRecordWriter — versioned records', () => {
     const port = new FakeFirestorePort();
     const rec = record({ storeName: 'MedicineLog', id: 'e1', fields: { quantity: 1 } });
 
-    await writer(port).writeRecord(rec, { seedChangeId: async () => 5 });
+    await writer(port).updateStoreRecord(rec, { seedChangeId: async () => 5 });
 
     expect(rec.changeId).toBe(6);
     const doc = port.get(`User/${AUTH}/MedicineLog/e1`);
@@ -57,7 +57,7 @@ describe('StoreRecordWriter — versioned records', () => {
     const port = new FakeFirestorePort();
     const rec = record({ storeName: 'MedicineLog', id: 'e1' });
 
-    await writer(port).writeRecord(rec);
+    await writer(port).updateStoreRecord(rec);
 
     expect(rec.changeId).toBe(1);
     expect(port.get(`User/${AUTH}/MedicineLog/e1`)!.changeId).toBe(1);
@@ -67,9 +67,9 @@ describe('StoreRecordWriter — versioned records', () => {
     const port = new FakeFirestorePort();
     const w = writer(port);
 
-    await w.writeRecord(record({ storeName: 'MedicineLog', id: 'e1' }));
+    await w.updateStoreRecord(record({ storeName: 'MedicineLog', id: 'e1' }));
     const second = record({ storeName: 'MedicineLog', id: 'e2' });
-    await w.writeRecord(second);
+    await w.updateStoreRecord(second);
 
     expect(second.changeId).toBe(2);
     const metas = await port.queryMeta(`User/${AUTH}/Meta`, 'MedicineLog');
@@ -81,8 +81,8 @@ describe('StoreRecordWriter — versioned records', () => {
     const w = writer(port);
     const path = `User/${AUTH}/MedicineLog/same-event`;
 
-    await w.writeRecord(record({ storeName: 'MedicineLog', id: 'same-event', fields: { quantity: 1 } }));
-    await w.writeRecord(record({ storeName: 'MedicineLog', id: 'same-event', fields: { quantity: 2 } }));
+    await w.updateStoreRecord(record({ storeName: 'MedicineLog', id: 'same-event', fields: { quantity: 1 } }));
+    await w.updateStoreRecord(record({ storeName: 'MedicineLog', id: 'same-event', fields: { quantity: 2 } }));
 
     const logDocs = port.paths().filter((p) => p.startsWith(`User/${AUTH}/MedicineLog/`));
     expect(logDocs).toEqual([path]);
@@ -96,7 +96,7 @@ describe('StoreRecordWriter — versioned records', () => {
     await port.setDoc(`User/${AUTH}/Meta/high`, { collection: 'MedicineLog', changeId: 7 });
 
     const rec = record({ storeName: 'MedicineLog', id: 'e1' });
-    await writer(port).writeRecord(rec);
+    await writer(port).updateStoreRecord(rec);
 
     expect(port.get(`User/${AUTH}/Meta/low`)).toBeUndefined();
     expect(port.get(`User/${AUTH}/Meta/high`)!.changeId).toBe(8);
@@ -107,7 +107,7 @@ describe('StoreRecordWriter — versioned records', () => {
     const port = new FakeFirestorePort();
     const rec = record({ storeName: 'Announcement', id: 'a1', isPrivate: false });
 
-    await writer(port).writeRecord(rec);
+    await writer(port).updateStoreRecord(rec);
 
     expect(port.get('Announcement/a1')!.changeId).toBe(1);
     const metas = await port.queryMeta('Meta', 'Announcement');
@@ -120,7 +120,7 @@ describe('StoreRecordWriter — User record', () => {
     const port = new FakeFirestorePort();
     const rec = record({ storeName: 'User', id: 'ignored', authId: AUTH, fields: { displayName: 'Ada' } });
 
-    await writer(port).writeRecord(rec);
+    await writer(port).updateStoreRecord(rec);
 
     expect(rec.changeId).toBe(0);
     expect(port.get(`User/${AUTH}`)).toMatchObject({ displayName: 'Ada' });
@@ -131,7 +131,7 @@ describe('StoreRecordWriter — User record', () => {
     await port.setDoc(`User/${AUTH}`, { displayName: 'Ada', changeId: 4 });
     const rec = record({ storeName: 'User', id: 'ignored', authId: AUTH, fields: { displayName: 'Ada B.' } });
 
-    await writer(port).writeRecord(rec);
+    await writer(port).updateStoreRecord(rec);
 
     expect(rec.changeId).toBe(5);
     expect(port.get(`User/${AUTH}`)).toMatchObject({ displayName: 'Ada B.', changeId: 5 });

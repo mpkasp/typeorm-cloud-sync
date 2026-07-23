@@ -1,34 +1,46 @@
-// Pure Firestore path construction, lifted out of CloudFirebaseFirestore so the client adapter and
-// the server (Cloud Function) build identical paths. Parameterized by `getAuthId` because the auth
-// id comes from the live user on the client and from the trigger params on the server.
-//
-// Note: paths are built WITHOUT a leading slash (`User/{uid}/...`). The original private helpers
-// produced leading-slash paths that only worked because the web SDK's `doc()`/`collection()`
-// normalize them away; the Admin SDK rejects a leading slash (empty first path segment). This form
-// is accepted by both SDKs.
+// The Firestore path helpers, moved verbatim out of CloudFirebaseFirestore so the client (web SDK)
+// and a Cloud Function (Admin SDK) build identical paths. Changes vs the originals are only:
+//   - they take a minimal { storeName, isPrivate, id?, authId? } instead of a StoreRecord, so
+//     storeNameOf(obj) is already resolved to obj.storeName by the caller;
+//   - the auth id comes from an injected getAuthId() instead of this.user?.authId;
+//   - userDocument returns `User/{uid}` WITHOUT the original leading slash. The old value
+//     `/User/{uid}` only worked because the web SDK's doc()/collection() normalize a leading slash
+//     away; the Admin SDK rejects it (empty first path segment). Both SDKs accept the un-prefixed
+//     form, and it is the same collection either way. This also lets metaCollectionPath drop the
+//     `doc(this.db, this.userDocument()).path + '/Meta'` hack for a plain template (same result).
 
-export type PathTarget = { storeName: string; isPrivate: boolean };
+export type PathTarget = { storeName: string; isPrivate: boolean; id?: string; authId?: string };
 
 export class PathBuilder {
   constructor(private getAuthId: () => string | null | undefined) {}
 
-  userPath(authId?: string | null): string {
-    const id = authId ?? this.getAuthId();
-    if (!id) {
-      throw new Error('No cloud user found.');
+  public collectionPath(obj: PathTarget): string {
+    if (!obj.isPrivate) {
+      return `${obj.storeName}`;
     }
-    return `User/${id}`;
+    return `${this.userDocument()}/${obj.storeName}`;
   }
 
-  collectionPath(rec: PathTarget): string {
-    return rec.isPrivate ? `${this.userPath()}/${rec.storeName}` : rec.storeName;
+  public metaCollectionPath(obj: PathTarget): string {
+    if (!obj.isPrivate) {
+      return `Meta`;
+    }
+    return `${this.userDocument()}/Meta`;
   }
 
-  metaCollectionPath(rec: Pick<PathTarget, 'isPrivate'>): string {
-    return rec.isPrivate ? `${this.userPath()}/Meta` : 'Meta';
+  public documentPath(obj: PathTarget): string {
+    return obj.storeName === 'User' ? this.userDocument(obj.authId) : `${this.collectionPath(obj)}/${obj.id}`;
   }
 
-  documentPath(rec: PathTarget & { id: string; authId?: string }): string {
-    return rec.storeName === 'User' ? this.userPath(rec.authId) : `${this.collectionPath(rec)}/${rec.id}`;
+  // User for private data
+  public userDocument(authId?: string | null): string {
+    // console.log('[userDocument] ', this.getAuthId());
+    if (!authId) {
+      authId = this.getAuthId();
+    }
+    if (authId) {
+      return `User/${authId}`;
+    }
+    throw new Error('No cloud user found.');
   }
 }

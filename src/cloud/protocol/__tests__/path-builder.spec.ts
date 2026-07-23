@@ -6,9 +6,9 @@ describe('PathBuilder', () => {
   const paths = new PathBuilder(() => AUTH);
 
   it('builds private paths under the user document, without a leading slash', () => {
-    expect(paths.userPath()).toBe(`User/${AUTH}`);
+    expect(paths.userDocument()).toBe(`User/${AUTH}`);
     expect(paths.collectionPath({ storeName: 'MedicineLog', isPrivate: true })).toBe(`User/${AUTH}/MedicineLog`);
-    expect(paths.metaCollectionPath({ isPrivate: true })).toBe(`User/${AUTH}/Meta`);
+    expect(paths.metaCollectionPath({ storeName: 'MedicineLog', isPrivate: true })).toBe(`User/${AUTH}/Meta`);
     expect(paths.documentPath({ storeName: 'MedicineLog', isPrivate: true, id: 'e1' })).toBe(
       `User/${AUTH}/MedicineLog/e1`,
     );
@@ -16,7 +16,7 @@ describe('PathBuilder', () => {
 
   it('builds public paths at the top level', () => {
     expect(paths.collectionPath({ storeName: 'Announcement', isPrivate: false })).toBe('Announcement');
-    expect(paths.metaCollectionPath({ isPrivate: false })).toBe('Meta');
+    expect(paths.metaCollectionPath({ storeName: 'Announcement', isPrivate: false })).toBe('Meta');
   });
 
   it('keys the User document by auth id', () => {

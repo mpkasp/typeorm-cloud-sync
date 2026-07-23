@@ -67,11 +67,13 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
-    // Delegate to the shared, SDK-agnostic write protocol. `asVersioned` writes changeId /
-    // recordChangeTimestamp back onto `obj` (live accessors), so we return the same instance.
-    // `seedChangeId` supplies the local store's max changeId used when a collection's Meta doc is
-    // first created — the one piece the server can't provide (it seeds 0 instead).
-    await this.writer.writeRecord(this.asVersioned(obj), {
+    // The body of this method (the meta/changeId logic + updatePublicStoreRecord) moved verbatim
+    // into the shared StoreRecordWriter so a Cloud Function can run the same protocol. `asVersioned`
+    // writes changeId / recordChangeTimestamp back onto `obj` (live accessors), so we return the
+    // same instance. `seedChangeId` is the original inline
+    // `StoreRecord.getLatestChangeId(this.localStore.dataSource, ...)` call, now passed in as a
+    // callback — the one piece the server can't supply (it seeds 0 instead).
+    await this.writer.updateStoreRecord(this.asVersioned(obj), {
       seedChangeId: () =>
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
@@ -261,7 +263,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   }
 
   // Adapt a StoreRecord to the protocol's minimal record view. changeId / recordChangeTimestamp are
-  // live accessors so the writer's mutations land back on the entity, and toBody() defers to raw().
+  // live accessors so the writer's mutations land back on the entity, and raw() defers to the entity raw().
   private asVersioned(obj: StoreRecord): VersionedRecord {
     return {
       storeName: storeNameOf(obj),
@@ -280,7 +282,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       set recordChangeTimestamp(v: Date) {
         obj.recordChangeTimestamp = v;
       },
-      toBody: () => obj.raw(),
+      raw: () => obj.raw(),
     };
   }
 
