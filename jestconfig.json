@@ -7,5 +7,6 @@
   "testEnvironment": "node",
   "transformIgnorePatterns": ["node_modules/(?!(uuid)/)"],
   "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.(jsx?|tsx?)$",
+  "testPathIgnorePatterns": ["/node_modules/", "/__tests__/fake-"],
   "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"]
 }
