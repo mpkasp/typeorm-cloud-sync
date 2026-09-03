@@ -25,7 +25,13 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
     if (this.cloud?.network) {
       if (event.queryRunner.data.StoreChangeLog?.insert || event.queryRunner.data.StoreChangeLog?.update) {
         event.queryRunner.data.StoreChangeLog.insert =  false;
-        return this.cloud.updateCloudFromChangeLog();
+        // Fire-and-forget, NOT `return`: TypeORM awaits a promise returned from a subscriber, so
+        // returning this would block every local commit on a full cloud round-trip — the opposite of
+        // local-first. The StoreChangeLog rows persist the pending work (and updateCloudFromChangeLog
+        // guards its own re-entrancy), so pushing in the background only changes WHEN the cloud
+        // catches up, never WHETHER it does.
+        void Promise.resolve(this.cloud.updateCloudFromChangeLog())
+          .catch(e => console.warn('[StoreChangeLogSubscriber] background cloud push failed', e));
       }
     } else {
       console.debug('[StoreChangeLogSubscriber - afterTransactionCommit] No cloud, or network, not updating...', this.cloud);
