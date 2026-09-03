@@ -10,6 +10,7 @@ import { FakeCloudStore } from './fake-cloud-store';
 const AUTH_ID = 'auth-A';
 
 let dataSource: DataSource;
+let otherDataSource: DataSource | undefined;
 let sqliteStore: SqliteStore;
 let network: BehaviorSubject<boolean>;
 let cloud: FakeCloudStore;
@@ -28,8 +29,16 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 
 const changeLogCount = () => changeLogs(dataSource).count();
 const seedUser = (init: Partial<any> = {}) => new User({ authId: AUTH_ID, ...init }).save({}, false);
 
+// A second DataSource over the same entity classes steals the ActiveRecord binding, so any call
+// still resolving against the global would read or write there instead of this store's database.
+const stealActiveRecordBinding = async () => {
+  otherDataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+  return otherDataSource;
+};
+
 beforeEach(async () => {
   silenceLibraryLogs();
+  otherDataSource = undefined;
   dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
   sqliteStore = new SqliteStore(dataSource, User);
   network = new BehaviorSubject<boolean>(true);
@@ -38,6 +47,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await waitFor(async () => !(cloud as any).updatingCloudFromChangeLog);
+  await otherDataSource?.destroy();
   await dataSource.destroy();
 });
 
@@ -288,5 +298,45 @@ describe('resolveRecord', () => {
     const resolved = await (cloud as any).resolveRecords(Note, [new Note({ id: 'a' }), new Note({ id: 'b' })]);
 
     expect(resolved).toHaveLength(1);
+  });
+});
+
+describe('with the ActiveRecord global bound to another database', () => {
+  test('the drain uploads its own store and leaves the other database untouched', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await waitFor(async () => (await changeLogCount()) === 0);
+    const note = await sqliteStore.saveRecord(new Note({ text: 'tenant a' }));
+    const other = await stealActiveRecordBinding();
+
+    await cloud.updateCloudFromChangeLog();
+
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${note.id}`)).toMatchObject({ text: 'tenant a' });
+    await expect(changeLogCount()).resolves.toBe(0);
+    await expect(other.getRepository(Note).count()).resolves.toBe(0);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
+  });
+
+  test('initialize finds its own user, not the one in the other database', async () => {
+    await seedUser();
+    const other = await stealActiveRecordBinding();
+    await new User({ authId: 'auth-B' }).saveWithManager(other.manager, {}, false);
+
+    await cloud.initialize(sqliteStore);
+
+    expect(cloud.user!.authId).toBe(AUTH_ID);
+  });
+
+  test('resolveRecord reads the local copy from its own store', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    const note = await sqliteStore.saveRecord(new Note({ text: 'local edit' }));
+    await stealActiveRecordBinding();
+    const resolve = jest.spyOn(sqliteStore, 'resolve');
+
+    await (cloud as any).resolveRecord(Note, new Note({ id: note.id, text: 'cloud edit' }));
+
+    const [, localArg] = resolve.mock.calls[0];
+    expect((localArg as Note).text).toBe('local edit');
   });
 });

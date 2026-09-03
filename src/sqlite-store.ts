@@ -2,7 +2,7 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import { DataSource } from 'typeorm/browser';
+import { DataSource, EntityManager } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
@@ -10,6 +10,12 @@ export class SqliteStore {
 
   constructor(dataSource: DataSource, public UserModel: typeof BaseUser) {
     this.dataSource = dataSource;
+  }
+
+  // Every persistence call in the library goes through this manager rather than the entity classes'
+  // globally bound DataSource, so a store only ever reads and writes its own database.
+  public get manager(): EntityManager {
+    return this.dataSource.manager;
   }
 
   public async resolve(cloudRecord: StoreRecord, localRecord?: StoreRecord | null): Promise<StoreRecord | null> {
@@ -35,9 +41,8 @@ export class SqliteStore {
         );
         try {
           const record = await this.saveRecord(cloudRecord, false);
-          const changeLogs = await StoreChangeLog.getFromRecord(localRecord);
-          // @ts-ignore
-          await StoreChangeLog.remove(changeLogs);
+          const changeLogs = await StoreChangeLog.getFromRecordWithManager(this.manager, localRecord);
+          await this.manager.remove(changeLogs);
           return record;
         } catch (e) {
           console.warn('[CloudSync - SqliteStore - resolve] unable to insert record', cloudRecord, e);
@@ -50,7 +55,7 @@ export class SqliteStore {
           localRecord,
           cloudRecord,
         );
-        await localRecord.updateChangeLog();
+        await localRecord.updateChangeLogWithManager(this.manager);
         return Promise.resolve(localRecord);
       }
     }
@@ -59,7 +64,7 @@ export class SqliteStore {
   }
 
   public async saveRecord(record: StoreRecord, updateChangeLog: boolean = true): Promise<StoreRecord> {
-    return await record.save({}, updateChangeLog);
+    return await record.saveWithManager(this.manager, {}, updateChangeLog);
   }
 
   public async dropPrivateTypeOrmCloudSyncRecords() {

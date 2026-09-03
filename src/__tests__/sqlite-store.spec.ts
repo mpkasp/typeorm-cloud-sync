@@ -8,6 +8,7 @@ import { changeLogs, createTestDataSource, Note, silenceLibraryLogs } from './fa
 // the clock.
 
 let dataSource: DataSource;
+let otherDataSource: DataSource | undefined;
 let sqliteStore: SqliteStore;
 
 const setUpdated = (record: StoreRecord, ms: number) => Object.assign(record, { updatedMs: ms });
@@ -15,13 +16,22 @@ const setUpdated = (record: StoreRecord, ms: number) => Object.assign(record, { 
 // A record as it arrives from the cloud: never persisted locally, carrying the cloud's id.
 const cloudNote = (init: Partial<any>) => Object.assign(new Note(init), { updatedMs: init.updatedMs });
 
+// A second DataSource over the same entity classes steals the ActiveRecord binding, so anything
+// still resolving against the global would write here instead of into the store under test.
+const stealActiveRecordBinding = async () => {
+  otherDataSource = await createTestDataSource([BaseUser, Note, StoreChangeLog]);
+  return otherDataSource;
+};
+
 beforeEach(async () => {
   silenceLibraryLogs();
+  otherDataSource = undefined;
   dataSource = await createTestDataSource([BaseUser, Note, StoreChangeLog]);
   sqliteStore = new SqliteStore(dataSource, BaseUser);
 });
 
 afterEach(async () => {
+  await otherDataSource?.destroy();
   await dataSource.destroy();
 });
 
@@ -59,6 +69,22 @@ describe('resolve when the cloud record is newer', () => {
     const stored = await dataSource.getRepository(Note).findOneBy({ id: local.id });
     expect(stored!.text).toBe('cloud edit');
     expect(stored!.changeId).toBe(9);
+    await expect(changeLogs(dataSource).count()).resolves.toBe(0);
+  });
+
+  test('overwrites a local record that has no pending change', async () => {
+    // The cloud-wins branch removes the record's change-log rows; there are none here, so the
+    // removal runs against an empty list.
+    const local = await new Note({ text: 'local edit' }).save({}, false);
+    setUpdated(local, 1000);
+    await expect(changeLogs(dataSource).count()).resolves.toBe(0);
+
+    const incoming = cloudNote({ id: local.id, text: 'cloud edit', changeId: 9, updatedMs: 2000 });
+    const resolved = (await sqliteStore.resolve(incoming, local)) as Note;
+
+    expect(resolved.text).toBe('cloud edit');
+    const stored = await dataSource.getRepository(Note).findOneBy({ id: local.id });
+    expect(stored!.text).toBe('cloud edit');
     await expect(changeLogs(dataSource).count()).resolves.toBe(0);
   });
 
@@ -121,5 +147,32 @@ describe('dropping records', () => {
 
     const remaining = await dataSource.getRepository(Note).find();
     expect(remaining.map((n) => n.text)).toEqual(['public']);
+  });
+});
+
+describe('with the ActiveRecord global bound to another database', () => {
+  test('a cloud-wins resolve updates its own store and clears its own change log', async () => {
+    const local = await sqliteStore.saveRecord(new Note({ text: 'local edit' }));
+    setUpdated(local, 1000);
+    const other = await stealActiveRecordBinding();
+
+    await sqliteStore.resolve(cloudNote({ id: local.id, text: 'cloud edit', changeId: 9, updatedMs: 2000 }), local);
+
+    const stored = await dataSource.getRepository(Note).findOneBy({ id: local.id });
+    expect(stored!.text).toBe('cloud edit');
+    await expect(changeLogs(dataSource).count()).resolves.toBe(0);
+    await expect(other.getRepository(Note).count()).resolves.toBe(0);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
+  });
+
+  test('a local-wins resolve re-queues into its own change log', async () => {
+    const local = await sqliteStore.saveRecord(new Note({ text: 'local edit' }), false);
+    setUpdated(local, 2000);
+    const other = await stealActiveRecordBinding();
+
+    await sqliteStore.resolve(cloudNote({ id: local.id, text: 'stale', changeId: 9, updatedMs: 1000 }), local);
+
+    await expect(changeLogs(dataSource).count()).resolves.toBe(1);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
   });
 });

@@ -309,7 +309,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         const currentUser = this.user;
         console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
         const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-        await updatedUser.save({}, false);
+        await updatedUser.saveWithManager(this.manager, {}, false);
 
         if (unresolved) {
           resolve();

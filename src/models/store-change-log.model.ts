@@ -1,6 +1,7 @@
 import { BaseEntity, Column, DataSource, Entity, EntityManager, PrimaryGeneratedColumn } from 'typeorm/browser';
 import { StoreRecord } from './store-record.model';
 import { storeNameOf } from './store-name';
+import { activeRecordManager } from './active-record';
 
 @Entity({ name: 'storechangelog' })
 export class StoreChangeLog extends BaseEntity {
@@ -24,9 +25,14 @@ export class StoreChangeLog extends BaseEntity {
     return new StoreChangeLog(storeNameOf(storeRecord), storeRecord.id!);
   }
 
+  public static getFromRecordWithManager(manager: EntityManager, storeRecord: StoreRecord): Promise<StoreChangeLog[]> {
+    return manager
+      .getRepository(StoreChangeLog)
+      .find({ where: { recordId: storeRecord.id, tableName: storeNameOf(storeRecord) } });
+  }
+
   public static getFromRecord(storeRecord: StoreRecord): Promise<StoreChangeLog[]> {
-    // @ts-ignore
-    return StoreChangeLog.find({ where: { recordId: storeRecord.id, tableName: storeNameOf(storeRecord) } });
+    return StoreChangeLog.getFromRecordWithManager(activeRecordManager(StoreChangeLog), storeRecord);
   }
 
   // Resolve the entity class for this change-log row's store name.

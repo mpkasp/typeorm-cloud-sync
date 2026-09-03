@@ -3,6 +3,7 @@ import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
 
+import { EntityManager } from 'typeorm/browser';
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUser } from '../models/base-user.model';
@@ -92,9 +93,17 @@ export abstract class CloudStore {
     private readonly networkSource: Observable<boolean> = browserNetwork$(),
   ) {}
 
+  // The EntityManager backing this store's DataSource. Reads and writes below go through it rather
+  // than the entity classes' globally bound DataSource, so a store only touches its own database.
+  protected get manager(): EntityManager {
+    return this.localStore.manager;
+  }
+
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
-    const user = await this.UserModel.findOne({where: {isDeleted: false}, order: { changeId: 'DESC' } });
+    const user = await this.manager
+      .getRepository(this.UserModel)
+      .findOne({ where: { isDeleted: false }, order: { changeId: 'DESC' } });
     // console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
@@ -209,12 +218,11 @@ export abstract class CloudStore {
 
     this.updatingCloudFromChangeLog = true;
     this.queueUpdateCloudFromChangeLog = false;
-    // @ts-ignore
-    const changes = await StoreChangeLog.find();
+    const changes = await this.manager.getRepository(StoreChangeLog).find();
     // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
     for (const change of changes) {
       console.debug('[updateCloudFromChangeLog], ', change);
-      const record = await change.getRecord(this.localStore.dataSource);
+      const record = await change.getRecordWithManager(this.manager);
       console.debug('[updateCloudFromChangeLog] record: ', record);
       if (record != null) {
         try {
@@ -225,10 +233,10 @@ export abstract class CloudStore {
           const newRecord = await this.updateStoreRecord(record);
 
           console.debug('[updateCloudFromChangeLog] done, now remove change');
-          await change.remove();
+          await this.manager.remove(change);
 
           console.debug('[updateCloudFromChangeLog] save local record');
-          await newRecord.save({ listeners: false }, false);
+          await newRecord.saveWithManager(this.manager, { listeners: false }, false);
 
           console.debug('[updateCloudFromChangeLog] starting subscription');
           await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
@@ -239,7 +247,7 @@ export abstract class CloudStore {
         }
       } else {
         console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
-        await change.remove();
+        await this.manager.remove(change);
       }
     }
 
@@ -264,12 +272,10 @@ export abstract class CloudStore {
 
   // Helper to call proper resolve function when a new object is received from the cloud
   protected async resolveRecord(recordType: typeof StoreRecord, obj: StoreRecord) {
-    // @ts-ignore
-    const localChange = await StoreChangeLog.findOne({ where: { recordId: obj.id } });
+    const localChange = await this.manager.getRepository(StoreChangeLog).findOne({ where: { recordId: obj.id } });
     if (localChange) {
       // console.log('[resolveRecords] Local change, need to resolve!', this.localStore);
-      // @ts-ignore
-      const localCopy = await recordType.findOneBy({ id: obj.id });
+      const localCopy = (await this.manager.getRepository(recordType).findOneBy({ id: obj.id })) as StoreRecord;
       return await this.localStore.resolve(obj, localCopy);
     } else {
       // console.log('[resolveRecords] No local change, resolving from cloud.', this.localStore);

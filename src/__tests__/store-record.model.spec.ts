@@ -3,17 +3,28 @@ import { BaseUser, StoreChangeLog } from '../index';
 import { StoreRecord } from '../models/store-record.model';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag } from './fake-entities';
 
-// Characterization tests for the model layer: what save() / updateChangeLog() / the change-log
-// round-trip do today, pinned before the multi-tenant refactor moves them off ActiveRecord.
+// Model-layer tests: save() / updateChangeLog() / the change-log round-trip, and that the
+// manager-scoped variants persist to the DataSource they are handed rather than a global.
 
 let dataSource: DataSource;
+let otherDataSource: DataSource | undefined;
+
+// Initializing a DataSource calls useDataSource() on every BaseEntity class it registers, so a
+// second one over the same entities steals the ActiveRecord binding. Manager-scoped calls must
+// ignore that binding and use the manager they are given; ActiveRecord calls follow it.
+const stealActiveRecordBinding = async () => {
+  otherDataSource = await createTestDataSource([BaseUser, Note, Tag, StoreChangeLog]);
+  return otherDataSource;
+};
 
 beforeEach(async () => {
   silenceLibraryLogs();
+  otherDataSource = undefined;
   dataSource = await createTestDataSource([BaseUser, Note, Tag, StoreChangeLog]);
 });
 
 afterEach(async () => {
+  await otherDataSource?.destroy();
   await dataSource.destroy();
 });
 
@@ -157,5 +168,64 @@ describe('StoreChangeLog round-trip', () => {
     await note.remove();
 
     await expect(change.getRecord(dataSource)).resolves.toBeNull();
+  });
+});
+
+describe('manager-scoped persistence', () => {
+  test('saveWithManager writes the record and its change log to the given manager', async () => {
+    const other = await stealActiveRecordBinding();
+
+    await new Note({ text: 'tenant a' }).saveWithManager(dataSource.manager);
+
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(1);
+    await expect(changeLogs(dataSource).count()).resolves.toBe(1);
+    await expect(other.getRepository(Note).count()).resolves.toBe(0);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
+  });
+
+  test('saveAllWithManager writes every record and its change log to the given manager', async () => {
+    const other = await stealActiveRecordBinding();
+
+    const saved = await Note.saveAllWithManager(dataSource.manager, [new Note({ text: 'a' }), new Note({ text: 'b' })]);
+
+    expect(saved).toHaveLength(2);
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(2);
+    await expect(changeLogs(dataSource).count()).resolves.toBe(2);
+    await expect(other.getRepository(Note).count()).resolves.toBe(0);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
+  });
+
+  test('saveAllWithManager accepts an empty list', async () => {
+    await expect(Note.saveAllWithManager(dataSource.manager, [])).resolves.toEqual([]);
+    await expect(changeLogs(dataSource).count()).resolves.toBe(0);
+  });
+
+  test('updateChangeLogWithManager logs against the given manager', async () => {
+    const note = await new Note({ text: 'tenant a' }).saveWithManager(dataSource.manager, {}, false);
+    const other = await stealActiveRecordBinding();
+
+    await note.updateChangeLogWithManager(dataSource.manager);
+
+    await expect(changeLogs(dataSource).count()).resolves.toBe(1);
+    await expect(changeLogs(other).count()).resolves.toBe(0);
+  });
+
+  test('getFromRecordWithManager reads the given manager', async () => {
+    const note = await new Note({ text: 'tenant a' }).saveWithManager(dataSource.manager);
+    const other = await stealActiveRecordBinding();
+
+    await expect(StoreChangeLog.getFromRecordWithManager(dataSource.manager, note)).resolves.toHaveLength(1);
+    await expect(StoreChangeLog.getFromRecordWithManager(other.manager, note)).resolves.toHaveLength(0);
+  });
+
+  test('the ActiveRecord entry points still follow the global binding', async () => {
+    const other = await stealActiveRecordBinding();
+
+    await new Note({ text: 'follows the newest DataSource' }).save();
+    await Note.save([new Note({ text: 'so does the bulk save' })]);
+
+    await expect(other.getRepository(Note).count()).resolves.toBe(2);
+    await expect(changeLogs(other).count()).resolves.toBe(2);
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(0);
   });
 });

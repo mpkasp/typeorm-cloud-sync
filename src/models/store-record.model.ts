@@ -3,6 +3,7 @@ import {
   BeforeInsert,
   BeforeUpdate,
   Column, DataSource,
+  EntityManager,
   Index,
   ObjectType,
   PrimaryGeneratedColumn,
@@ -11,6 +12,7 @@ import {
 import { StoreChangeLog } from './store-change-log.model';
 import {EntityTarget} from 'typeorm/browser';
 import { storeNameOf } from './store-name';
+import { activeRecordManager } from './active-record';
 
 export abstract class StoreRecord extends BaseEntity {
   // Stable storage identity, immune to class-name mangling by bundlers.
@@ -60,12 +62,21 @@ export abstract class StoreRecord extends BaseEntity {
     return latestObj ? latestObj.changeId : 0;
   }
 
-  static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {
-    const es = (await super.save(entities, options)) as StoreRecord[];
-    for (const e of es) {
-      await e.updateChangeLog();
+  static async saveAllWithManager<T extends BaseEntity>(
+    this: ObjectType<T>,
+    manager: EntityManager,
+    entities: T[],
+    options?: SaveOptions,
+  ): Promise<T[]> {
+    const saved = await manager.save(entities, options);
+    for (const record of saved as unknown as StoreRecord[]) {
+      await record.updateChangeLogWithManager(manager);
     }
-    return Promise.resolve(es);
+    return saved;
+  }
+
+  static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {
+    return (this as any).saveAllWithManager(activeRecordManager(this as Function), entities, options);
   }
 
   @BeforeInsert()
@@ -123,32 +134,33 @@ export abstract class StoreRecord extends BaseEntity {
     return reverse ? 'asc' : 'desc';
   }
 
-  async updateChangeLog(): Promise<StoreChangeLog> {
-    // @ts-ignore
-    const existingChangeLog = await StoreChangeLog.getRepository().findOneBy({
+  // Queue this record for upload by adding a change-log row via the given manager. Only the most
+  // recent change to a record is kept, so an existing row is left in place.
+  async updateChangeLogWithManager(manager: EntityManager): Promise<StoreChangeLog> {
+    const existingChangeLog = await manager.getRepository(StoreChangeLog).findOneBy({
       tableName: storeNameOf(this),
       recordId: this.id,
     });
-    // console.log(existingChangeLog);
-    if (!existingChangeLog) {
-      // console.log(`[updateChangeLog] change log doesnt exist, making a new one ${storeNameOf(this)}, ${this.id}`);
-      return await new StoreChangeLog(storeNameOf(this), this.id!).save();
-    } else {
-      // console.log(`[updateChangeLog] change log exists, skipping making a new one ${this.constructor.name}, ${this.id}`);
+    if (existingChangeLog) {
+      return existingChangeLog;
     }
-    return existingChangeLog;
+    return manager.save(new StoreChangeLog(storeNameOf(this), this.id!));
+  }
+
+  async updateChangeLog(): Promise<StoreChangeLog> {
+    return this.updateChangeLogWithManager(activeRecordManager(this.constructor));
+  }
+
+  async saveWithManager(manager: EntityManager, options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
+    console.debug('[save]', this, updateChangeLog, options);
+    const savedRecord = await manager.save(this, options);
+    if (updateChangeLog) {
+      await this.updateChangeLogWithManager(manager);
+    }
+    return savedRecord;
   }
 
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
-    console.log('[save]', this, updateChangeLog, options);
-    const savedRecord = await super.save(options);
-    console.log('[save] saved record');
-    if (updateChangeLog) {
-      console.log('[save] saving store record, update change log.');
-      // Removed await from update change log - this speeds things up in the ui nicely, but it may affect function. Be aware!
-      await this.updateChangeLog();
-      console.log('[save] saved change log');
-    }
-    return savedRecord;
+    return this.saveWithManager(activeRecordManager(this.constructor), options, updateChangeLog);
   }
 }
