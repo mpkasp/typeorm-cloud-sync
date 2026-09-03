@@ -9,6 +9,7 @@ import { StoreRecordWriter } from './protocol/store-record-writer';
 import { VersionedRecord } from './protocol/firestore-port';
 import { WebFirestorePort } from './web-firestore-port';
 
+import { Observable } from 'rxjs';
 import { FirebaseApp, initializeApp } from 'firebase/app';
 import {
   collection,
@@ -40,8 +41,9 @@ export class CloudFirebaseFirestore extends CloudStore {
     protected UserModel: typeof BaseUser,
     protected publicRecords: typeof StoreRecord[],
     protected privateRecords: typeof StoreRecord[],
+    network$?: Observable<boolean>,
   ) {
-    super(UserModel, publicRecords, privateRecords);
+    super(UserModel, publicRecords, privateRecords, network$);
   }
 
   public async initialize(sqliteStore: SqliteStore, app: FirebaseApp) {

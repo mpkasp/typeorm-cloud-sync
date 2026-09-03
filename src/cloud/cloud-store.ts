@@ -36,8 +36,28 @@ import { BaseUser } from '../models/base-user.model';
 // If !network || !user unsubscribe
 // else subscribe
 
+// Network state reaches a CloudStore as an observable rather than being read off `navigator`/
+// `window` directly, so a store can be constructed off-browser (unit tests, SSR). The default
+// source is the original browser behaviour.
+function isOnline(): boolean {
+  // Node >= 21 defines `navigator` but no `onLine`, so presence of the global is not enough.
+  const online = typeof navigator === 'undefined' ? undefined : navigator.onLine;
+  return typeof online === 'boolean' ? online : true;
+}
+
+export function browserNetwork$(): Observable<boolean> {
+  if (typeof window === 'undefined') {
+    return of(isOnline());
+  }
+  return merge(
+    of(isOnline()),
+    fromEvent(window, 'online').pipe(mapTo(true)),
+    fromEvent(window, 'offline').pipe(mapTo(false)),
+  );
+}
+
 export abstract class CloudStore {
-  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(navigator.onLine);
+  protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(isOnline());
   public network$: Observable<boolean> = this.networkSubject.asObservable();
   public get network(): boolean {
     return this.networkSubject.getValue();
@@ -69,6 +89,7 @@ export abstract class CloudStore {
     protected UserModel: typeof BaseUser,
     protected publicRecords: typeof StoreRecord[],
     protected privateRecords: typeof StoreRecord[],
+    private readonly networkSource: Observable<boolean> = browserNetwork$(),
   ) {}
 
   protected async _initializeBase(localStore: SqliteStore) {
@@ -87,12 +108,9 @@ export abstract class CloudStore {
   }
 
   private subscribeNetwork() {
-    const networkObservable = merge(
-      of(navigator.onLine),
-      fromEvent(window, 'online').pipe(mapTo(true)),
-      fromEvent(window, 'offline').pipe(mapTo(false)),
-    );
-    networkObservable.subscribe(this.networkSubject);
+    // Forwarding values instead of subscribing the subject itself keeps a completing source
+    // (the off-browser default) from completing network$.
+    this.networkSource.subscribe((online) => this.networkSubject.next(online));
     this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
   }
 
