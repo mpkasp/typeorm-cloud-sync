@@ -4,9 +4,9 @@ import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
 import { storeNameOf } from '../../models/store-name';
-import { PathBuilder } from '../protocol/path-builder';
-import { StoreRecordWriter } from '../protocol/store-record-writer';
-import { VersionedRecord } from '../protocol/firestore-port';
+import { PathBuilder } from './protocol/path-builder';
+import { StoreRecordWriter } from './protocol/store-record-writer';
+import { VersionedRecord } from './protocol/firestore-port';
 import { WebFirestorePort } from './web-firestore-port';
 
 import { FirebaseApp, initializeApp } from 'firebase/app';
@@ -32,7 +32,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
   private firestoreSubscriptions: { [key: string]: FirestoreSubscription } = {};
   // Shared, SDK-agnostic versioned-write protocol (the same StoreRecordWriter a Cloud Function runs
-  // over an Admin-SDK port), bound here to the modular web SDK. See src/cloud/protocol.
+  // over an Admin-SDK port), bound here to the modular web SDK. See src/cloud/firebase/protocol.
   private readonly paths = new PathBuilder(() => this.user?.authId);
   private writer!: StoreRecordWriter;
 

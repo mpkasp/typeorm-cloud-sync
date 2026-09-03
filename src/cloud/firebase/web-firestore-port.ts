@@ -10,7 +10,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { DocSnap, FirestorePort, WriteTxn } from '../protocol/firestore-port';
+import { DocSnap, FirestorePort, WriteTxn } from './protocol/firestore-port';
 
 // FirestorePort bound to the modular web SDK (`firebase/firestore`). The client's
 // CloudFirebaseFirestore delegates all versioned writes through StoreRecordWriter over this port;
