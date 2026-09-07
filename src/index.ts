@@ -4,6 +4,8 @@ export { BaseUser } from './models/base-user.model';
 export { Meta } from './models/meta.model';
 
 export { SqliteStore } from './sqlite-store';
+export { Tenant, TenantRegistry } from './tenant';
+export type { TenantOpener } from './tenant';
 
 export { CloudFirebaseFirestore } from './cloud/firebase/cloud-firebase-firestore';
 export { WebFirestorePort } from './cloud/firebase/web-firestore-port';

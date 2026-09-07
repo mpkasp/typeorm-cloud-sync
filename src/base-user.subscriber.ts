@@ -1,10 +1,9 @@
 // tslint:disable: no-console
 
-import { EntitySubscriberInterface, EventSubscriber, InsertEvent, UpdateEvent } from 'typeorm/browser';
+import { EntitySubscriberInterface, InsertEvent, UpdateEvent } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
 import { CloudStore } from './cloud/cloud-store';
 
-@EventSubscriber()
 export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
   constructor(public UserModel: typeof BaseUser, public cloudStore: CloudStore) {}
 

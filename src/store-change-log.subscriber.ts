@@ -1,8 +1,7 @@
-import {EntitySubscriberInterface, EventSubscriber, InsertEvent, TransactionCommitEvent, UpdateEvent} from 'typeorm/browser';
+import {EntitySubscriberInterface, InsertEvent, TransactionCommitEvent, UpdateEvent} from 'typeorm/browser';
 import { StoreChangeLog } from './models/store-change-log.model';
 import { CloudStore } from './cloud/cloud-store';
 
-@EventSubscriber()
 export class StoreChangeLogSubscriber implements EntitySubscriberInterface<StoreChangeLog> {
   constructor(public cloud: CloudStore) {}
 

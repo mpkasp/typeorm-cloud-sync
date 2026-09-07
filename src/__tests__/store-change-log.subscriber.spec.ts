@@ -4,18 +4,29 @@ import { SqliteStore, StoreChangeLog, StoreChangeLogSubscriber } from '../index'
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
-// Characterization tests for the change-log subscriber, the trigger that is supposed to push a
-// local commit to the cloud. Step 3 of the multi-tenant plan re-wires it per tenant, so what it
-// does — and does not — do today is pinned here.
+// The change-log subscriber is the trigger that pushes a local commit to the cloud. A CloudStore
+// attaches its own instance to its own DataSource, so these cover both the routing and the
+// subscriber's own logic.
 
 let dataSource: DataSource;
 let cloud: FakeCloudStore;
 
 const commitEvent = (data: any) => ({ queryRunner: { data } }) as any;
 
+const drained = async (store: FakeCloudStore, source: DataSource) => {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (!(store as any).updatingCloudFromChangeLog && (await changeLogs(source).count()) === 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('timed out waiting for the change log to drain');
+};
+
 beforeEach(async () => {
   silenceLibraryLogs();
-  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog], [StoreChangeLogSubscriber]);
+  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
   cloud = new FakeCloudStore(User, [], [Note], new BehaviorSubject<boolean>(true));
   await new User({ authId: 'auth-A' }).save({}, false);
   await cloud.initialize(new SqliteStore(dataSource, User));
@@ -25,14 +36,20 @@ afterEach(async () => {
   await dataSource.destroy();
 });
 
-test('a local save does not reach the cloud on its own', async () => {
-  // TypeORM builds a registered subscriber with `new Subscriber()`, so the instance the DataSource
-  // holds has no `cloud` and pushes nothing. CloudStore's own `new StoreChangeLogSubscriber(this)`
-  // is never attached to a DataSource, so it never sees a commit either.
-  const note = await new Note({ text: 'local only' }).save();
+test('a local save pushes to the cloud without an explicit drain', async () => {
+  const note = await new Note({ text: 'local edit' }).save();
 
-  await expect(changeLogs(dataSource).count()).resolves.toBe(1);
-  expect(cloud.port.get(`User/auth-A/Note/${note.id}`)).toBeUndefined();
+  await drained(cloud, dataSource);
+  expect(cloud.port.get(`User/auth-A/Note/${note.id}`)).toMatchObject({ text: 'local edit' });
+});
+
+test('listing the subscriber class on a DataSource registers nothing', async () => {
+  // The class carries no @EventSubscriber() metadata, so TypeORM's class-based registration — which
+  // would build it with a zero-argument constructor and no cloud — cannot pick it up.
+  const classRegistered = await createTestDataSource([User, Note, StoreChangeLog], [StoreChangeLogSubscriber]);
+
+  expect(classRegistered.subscribers).toHaveLength(0);
+  await classRegistered.destroy();
 });
 
 describe('when the subscriber holds a cloud', () => {
@@ -101,5 +118,33 @@ describe('when the subscriber holds a cloud', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(push).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('routing between tenants', () => {
+  let otherDataSource: DataSource;
+  let otherCloud: FakeCloudStore;
+
+  beforeEach(async () => {
+    otherDataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+    otherCloud = new FakeCloudStore(User, [], [Note], new BehaviorSubject<boolean>(true));
+    await new User({ authId: 'auth-B' }).saveWithManager(otherDataSource.manager, {}, false);
+    await otherCloud.initialize(new SqliteStore(otherDataSource, User));
+  });
+
+  afterEach(async () => {
+    await otherDataSource.destroy();
+  });
+
+  test('a commit on one tenant never fires the other tenant push', async () => {
+    const otherPush = jest.spyOn(otherCloud, 'updateCloudFromChangeLog');
+
+    const note = await new Note({ text: 'tenant a' }).saveWithManager(dataSource.manager);
+
+    await drained(cloud, dataSource);
+    expect(cloud.port.get(`User/auth-A/Note/${note.id}`)).toBeDefined();
+    expect(otherPush).not.toHaveBeenCalled();
+    expect(otherCloud.port.paths()).toEqual([]);
+    await expect(changeLogs(otherDataSource).count()).resolves.toBe(0);
   });
 });

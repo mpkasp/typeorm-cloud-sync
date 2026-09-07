@@ -29,6 +29,17 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 
 const changeLogCount = () => changeLogs(dataSource).count();
 const seedUser = (init: Partial<any> = {}) => new User({ authId: AUTH_ID, ...init }).save({}, false);
 
+// A local commit now pushes to the cloud in the background, so a test that needs a change to sit
+// in the log stages it while the tenant is offline.
+const stageOffline = async <T>(save: () => Promise<T>): Promise<T> => {
+  network.next(false);
+  try {
+    return await save();
+  } finally {
+    network.next(true);
+  }
+};
+
 // A second DataSource over the same entity classes steals the ActiveRecord binding, so any call
 // still resolving against the global would read or write there instead of this store's database.
 const stealActiveRecordBinding = async () => {
@@ -114,14 +125,14 @@ describe('updateCloudFromChangeLog guards', () => {
   beforeEach(async () => {
     await seedUser();
     await cloud.initialize(sqliteStore);
-    await new Note({ text: 'pending' }).save();
+    await stageOffline(() => new Note({ text: 'pending' }).save());
     await waitFor(async () => !(cloud as any).updatingCloudFromChangeLog);
     cloud.port.docs.clear();
     cloud.calls.length = 0;
   });
 
   test('does nothing without network', async () => {
-    await new Note({ text: 'offline edit' }).save();
+    await stageOffline(() => new Note({ text: 'offline edit' }).save());
     network.next(false);
 
     await cloud.updateCloudFromChangeLog();
@@ -131,7 +142,7 @@ describe('updateCloudFromChangeLog guards', () => {
   });
 
   test('does nothing while downloading', async () => {
-    await new Note({ text: 'mid download' }).save();
+    await stageOffline(() => new Note({ text: 'mid download' }).save());
     (cloud as any).downloadingSubject.next(true);
 
     await cloud.updateCloudFromChangeLog();
@@ -141,7 +152,7 @@ describe('updateCloudFromChangeLog guards', () => {
   });
 
   test('does nothing before the private cloud is initialized', async () => {
-    await new Note({ text: 'too early' }).save();
+    await stageOffline(() => new Note({ text: 'too early' }).save());
     (cloud as any).privateCloudInitialized = false;
 
     await cloud.updateCloudFromChangeLog();
@@ -153,7 +164,7 @@ describe('updateCloudFromChangeLog guards', () => {
   test('coalesces a concurrent drain instead of running it twice', async () => {
     await cloud.updateCloudFromChangeLog();
     expect(await changeLogCount()).toBe(0);
-    await new Note({ text: 'concurrent' }).save();
+    await stageOffline(() => new Note({ text: 'concurrent' }).save());
     cloud.calls.length = 0;
 
     let release: () => void = () => undefined;
@@ -182,8 +193,8 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('uploads a private record, bumps its changeId and clears the change log', async () => {
-    const note = await new Note({ text: 'sync me' }).save({}, false);
-    await note.updateChangeLog();
+    const note = await stageOffline(() => new Note({ text: 'sync me' }).save({}, false));
+    await stageOffline(() => note.updateChangeLog());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -199,7 +210,7 @@ describe('updateCloudFromChangeLog drain', () => {
   test('uploads a user record to its auth-keyed document, not into a collection', async () => {
     const user = cloud.user as User;
     user.displayName = 'Renamed';
-    await user.save();
+    await stageOffline(() => user.save());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -209,7 +220,7 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('brackets each upload with unsubscribe/subscribe of that record type', async () => {
-    await new Note({ text: 'sync me' }).save();
+    await stageOffline(() => new Note({ text: 'sync me' }).save());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -217,7 +228,7 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('writes a public record outside the user document', async () => {
-    const tag = await new Tag({ label: 'shared', isPrivate: false }).save();
+    const tag = await stageOffline(() => new Tag({ label: 'shared', isPrivate: false }).save());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -227,9 +238,9 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('drains every pending change in one pass', async () => {
-    await new Note({ text: 'one' }).save();
-    await new Note({ text: 'two' }).save();
-    await new Tag({ label: 'three' }).save();
+    await stageOffline(() => new Note({ text: 'one' }).save());
+    await stageOffline(() => new Note({ text: 'two' }).save());
+    await stageOffline(() => new Tag({ label: 'three' }).save());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -239,7 +250,7 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('drops a change-log row whose record no longer exists', async () => {
-    const note = await new Note({ text: 'doomed' }).save();
+    const note = await stageOffline(() => new Note({ text: 'doomed' }).save());
     await note.remove();
 
     await cloud.updateCloudFromChangeLog();
@@ -251,7 +262,7 @@ describe('updateCloudFromChangeLog drain', () => {
   test('keeps the change-log row when the upload fails', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(cloud, 'updateStoreRecord').mockRejectedValue(new Error('cloud unreachable'));
-    await new Note({ text: 'unsent' }).save();
+    await stageOffline(() => new Note({ text: 'unsent' }).save());
 
     await cloud.updateCloudFromChangeLog();
 
@@ -267,7 +278,7 @@ describe('resolveRecord', () => {
   });
 
   test('resolves against the local copy when a local change is pending', async () => {
-    const note = await new Note({ text: 'local edit' }).save();
+    const note = await stageOffline(() => new Note({ text: 'local edit' }).save());
     const resolve = jest.spyOn(sqliteStore, 'resolve');
 
     const incoming = new Note({ id: note.id, text: 'cloud edit' });
@@ -306,7 +317,7 @@ describe('with the ActiveRecord global bound to another database', () => {
     await seedUser();
     await cloud.initialize(sqliteStore);
     await waitFor(async () => (await changeLogCount()) === 0);
-    const note = await sqliteStore.saveRecord(new Note({ text: 'tenant a' }));
+    const note = await stageOffline(() => sqliteStore.saveRecord(new Note({ text: 'tenant a' })));
     const other = await stealActiveRecordBinding();
 
     await cloud.updateCloudFromChangeLog();
@@ -330,7 +341,7 @@ describe('with the ActiveRecord global bound to another database', () => {
   test('resolveRecord reads the local copy from its own store', async () => {
     await seedUser();
     await cloud.initialize(sqliteStore);
-    const note = await sqliteStore.saveRecord(new Note({ text: 'local edit' }));
+    const note = await stageOffline(() => sqliteStore.saveRecord(new Note({ text: 'local edit' })));
     await stealActiveRecordBinding();
     const resolve = jest.spyOn(sqliteStore, 'resolve');
 

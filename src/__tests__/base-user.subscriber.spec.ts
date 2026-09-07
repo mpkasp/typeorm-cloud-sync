@@ -4,8 +4,8 @@ import { BaseUserSubscriber, SqliteStore, StoreChangeLog } from '../index';
 import { createTestDataSource, Note, silenceLibraryLogs, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
-// The other globally-decorated subscriber Step 3 has to re-wire per tenant. Like
-// StoreChangeLogSubscriber it is inert unless something hands it a CloudStore.
+// Publishes a saved user onto its tenant's CloudStore. Attached per tenant by CloudStore, so a
+// user saved in one database can only reach that database's cloud.
 
 let dataSource: DataSource;
 let cloud: FakeCloudStore;
@@ -13,7 +13,7 @@ let subscriber: BaseUserSubscriber;
 
 beforeEach(async () => {
   silenceLibraryLogs();
-  dataSource = await createTestDataSource([User, Note, StoreChangeLog], [BaseUserSubscriber]);
+  dataSource = await createTestDataSource([User, Note, StoreChangeLog]);
   cloud = new FakeCloudStore(User, [], [Note], new BehaviorSubject<boolean>(true));
   await cloud.initialize(new SqliteStore(dataSource, User));
   subscriber = new BaseUserSubscriber(User, cloud);
@@ -50,12 +50,17 @@ test('is a no-op without a cloud store', () => {
   expect(() => unwired.afterInsert({ entity: new User({}) } as any)).not.toThrow();
 });
 
-test('a DataSource-registered instance gets no cloud, so saves stay local', async () => {
-  // TypeORM constructs registered subscribers with `new Subscriber()`: no UserModel (so it listens
-  // to everything) and no cloud store (so it publishes nothing).
+test('the tenant CloudStore attaches its own instance, so a saved user is published', async () => {
   expect(cloud.user).toBeNull();
 
   await new User({ authId: 'auth-B' }).save({}, false);
 
-  expect(cloud.user).toBeNull();
+  expect(cloud.user!.authId).toBe('auth-B');
+});
+
+test('listing the subscriber class on a DataSource registers nothing', async () => {
+  const classRegistered = await createTestDataSource([User, Note, StoreChangeLog], [BaseUserSubscriber]);
+
+  expect(classRegistered.subscribers).toHaveLength(0);
+  await classRegistered.destroy();
 });

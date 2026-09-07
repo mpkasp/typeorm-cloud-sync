@@ -40,6 +40,10 @@ test('Test Save', async () => {
 test('Test Resolve', async () => {
   let cloudRecord = await new BaseUser({ displayName: 'A Cloud Name', changeId: 2 }).save();
   let localRecord = await new BaseUser({ displayName: 'A Local Name', changeId: 1 }).save();
+  // resolve() branches on updatedMs, and two saves can land in the same millisecond — which reads
+  // as "unchanged" and returns null. Set the times so this stays the local-is-newer case.
+  Object.assign(cloudRecord, { updatedMs: 1000 });
+  Object.assign(localRecord, { updatedMs: 2000 });
   const resolvedRecord = (await sqliteStore.resolve(cloudRecord, localRecord)) as BaseUser;
   expect(resolvedRecord.displayName).toBe(localRecord.displayName);
 });

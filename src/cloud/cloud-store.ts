@@ -3,9 +3,10 @@ import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
 
-import { EntityManager } from 'typeorm/browser';
-import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of } from 'rxjs';
+import { DataSource, EntityManager, EntitySubscriberInterface } from 'typeorm/browser';
+import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
+import { BaseUserSubscriber } from '../base-user.subscriber';
 import { BaseUser } from '../models/base-user.model';
 
 // Each store needs CRUD
@@ -79,7 +80,8 @@ export abstract class CloudStore {
   protected privateCloudInitialized: boolean = false;
   protected localStore: SqliteStore;
   private uploading: boolean = false;
-  private changeLogSubscriber = new StoreChangeLogSubscriber(this);
+  private attachedSubscribers: EntitySubscriberInterface<any>[] = [];
+  private readonly subscriptions = new Subscription();
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
@@ -101,6 +103,7 @@ export abstract class CloudStore {
 
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
+    this.attachSubscribers(localStore.dataSource);
     const user = await this.manager
       .getRepository(this.UserModel)
       .findOne({ where: { isDeleted: false }, order: { changeId: 'DESC' } });
@@ -116,16 +119,52 @@ export abstract class CloudStore {
     this.subscribeLocalUser(); // Handles private cloud subscription
   }
 
+  // A tenant's subscribers live on that tenant's DataSource, so a commit routes to the CloudStore
+  // owning the database it happened in rather than to whichever store registered last.
+  private attachSubscribers(dataSource: DataSource) {
+    this.detachSubscribers();
+    this.attachedSubscribers = [new StoreChangeLogSubscriber(this), new BaseUserSubscriber(this.UserModel, this)];
+    dataSource.subscribers.push(...this.attachedSubscribers);
+  }
+
+  private detachSubscribers() {
+    const subscribers = this.localStore?.dataSource?.subscribers;
+    if (subscribers) {
+      this.attachedSubscribers.forEach((subscriber) => {
+        const index = subscribers.indexOf(subscriber);
+        if (index >= 0) {
+          subscribers.splice(index, 1);
+        }
+      });
+    }
+    this.attachedSubscribers = [];
+  }
+
+  // Release this tenant's hold on its DataSource and cloud. Leaves other tenants untouched.
+  public dispose() {
+    this.detachSubscribers();
+    this.unsubscribePrivateCloud();
+    this.subscriptions.unsubscribe();
+  }
+
   private subscribeNetwork() {
     // Forwarding values instead of subscribing the subject itself keeps a completing source
     // (the off-browser default) from completing network$.
-    this.networkSource.subscribe((online) => this.networkSubject.next(online));
-    this.downloading$.subscribe(async (d) => await this.updateCloudFromChangeLog());
+    this.subscriptions.add(this.networkSource.subscribe((online) => this.networkSubject.next(online)));
+    // Fire-and-forget with its own catch: an unhandled rejection here (a drain racing a disposed
+    // tenant's destroyed DataSource, say) would otherwise take down the process.
+    this.subscriptions.add(
+      this.downloading$.subscribe(() => {
+        void this.updateCloudFromChangeLog().catch((e) =>
+          console.warn('[CloudStore] background cloud push failed', e),
+        );
+      }),
+    );
   }
 
   private subscribeLocalUser() {
     console.debug('[CloudStore - subscribeLocalUser] setup.');
-    this.userSubject.subscribe((user) => {
+    const subscription = this.userSubject.subscribe((user) => {
       // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
       // This may mess with sign out logic... need to think...
       console.debug('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
@@ -145,6 +184,7 @@ export abstract class CloudStore {
 
       this.lastUser = user;
     });
+    this.subscriptions.add(subscription);
   }
 
   // Used when logging out and clearing database to trigger unsubscribing from cloud
@@ -253,7 +293,9 @@ export abstract class CloudStore {
 
     this.updatingCloudFromChangeLog = false;
     if (this.queueUpdateCloudFromChangeLog) {
-      this.updateCloudFromChangeLog();
+      void this.updateCloudFromChangeLog().catch((e) =>
+        console.warn('[updateCloudFromChangeLog] queued cloud push failed', e),
+      );
     }
   }
 
