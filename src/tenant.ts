@@ -12,8 +12,11 @@ export class Tenant {
     public readonly cloud: CloudStore,
   ) {}
 
+  // Stop the cloud first so no new work starts, then let any in-flight drain finish before the
+  // database goes away underneath it.
   async dispose(): Promise<void> {
     this.cloud.dispose();
+    await this.cloud.whenIdle();
     await this.localStore.dataSource.destroy();
   }
 }

@@ -139,6 +139,64 @@ test('a disposed tenant does not resubscribe when its user changes', async () =>
   expect(cloud.calls).toEqual([]);
 });
 
+test('dispose waits for an in-flight drain before destroying the database', async () => {
+  const tenant = await registry.open('auth-A');
+  await waitFor(() => !(tenant.cloud as any).updatingCloudFromChangeLog);
+  const dataSource = tenant.localStore.dataSource;
+  const network = networks.get('auth-A')!;
+  network.next(false);
+  const note = await new Note({ text: 'mid flight' }).saveWithManager(tenant.localStore.manager);
+  network.next(true);
+
+  let uploading: () => void = () => undefined;
+  const reachedUpload = new Promise<void>((resolve) => (uploading = resolve));
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const upload = tenant.cloud.updateStoreRecord.bind(tenant.cloud);
+  jest.spyOn(tenant.cloud, 'updateStoreRecord').mockImplementation(async (record) => {
+    uploading();
+    await gate;
+    return upload(record);
+  });
+
+  void tenant.cloud.updateCloudFromChangeLog();
+  await reachedUpload;
+  const closing = registry.close('auth-A');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(dataSource.isInitialized).toBe(true);
+
+  release();
+  await closing;
+
+  expect(dataSource.isInitialized).toBe(false);
+  expect((tenant.cloud as FakeCloudStore).port.get(`User/auth-A/Note/${note.id}`)).toBeDefined();
+});
+
+test('whenIdle gives up on a drain that never settles', async () => {
+  const tenant = await registry.open('auth-A');
+  await waitFor(() => !(tenant.cloud as any).updatingCloudFromChangeLog);
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const network = networks.get('auth-A')!;
+  network.next(false);
+  await new Note({ text: 'never uploads' }).saveWithManager(tenant.localStore.manager);
+  network.next(true);
+
+  let release: () => void = () => undefined;
+  const hung = new Promise<void>((resolve) => (release = resolve));
+  jest.spyOn(tenant.cloud, 'updateStoreRecord').mockImplementation(async (record) => {
+    await hung;
+    return record;
+  });
+
+  void tenant.cloud.updateCloudFromChangeLog();
+  await waitFor(() => (tenant.cloud as any).updatingCloudFromChangeLog);
+  const started = Date.now();
+  await tenant.cloud.whenIdle(50);
+
+  expect(Date.now() - started).toBeLessThan(1000);
+  release();
+});
+
 test('closeAll disposes every open tenant', async () => {
   const a = await registry.open('auth-A');
   const b = await registry.open('auth-B');

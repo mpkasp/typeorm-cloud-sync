@@ -82,6 +82,7 @@ export abstract class CloudStore {
   private uploading: boolean = false;
   private attachedSubscribers: EntitySubscriberInterface<any>[] = [];
   private readonly subscriptions = new Subscription();
+  private drainInFlight: Promise<void> | null = null;
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
@@ -138,6 +139,26 @@ export abstract class CloudStore {
       });
     }
     this.attachedSubscribers = [];
+  }
+
+  // Resolves once no drain is in flight, so a caller can tear down the DataSource without pulling
+  // it out from under one. Bounded: a cloud call that never settles (see the subscribeRecord TODO
+  // in updateCloudFromChangeLog) must not be able to block disposal forever.
+  public async whenIdle(timeoutMs: number = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.drainInFlight) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        console.warn('[CloudStore] timed out waiting for the change-log drain to finish');
+        return;
+      }
+      let timer: any;
+      await Promise.race([
+        this.drainInFlight,
+        new Promise<void>((resolve) => (timer = setTimeout(resolve, remaining))),
+      ]);
+      clearTimeout(timer);
+    }
   }
 
   // Release this tenant's hold on its DataSource and cloud. Leaves other tenants untouched.
@@ -258,40 +279,47 @@ export abstract class CloudStore {
 
     this.updatingCloudFromChangeLog = true;
     this.queueUpdateCloudFromChangeLog = false;
-    const changes = await this.manager.getRepository(StoreChangeLog).find();
-    // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
-    for (const change of changes) {
-      console.debug('[updateCloudFromChangeLog], ', change);
-      const record = await change.getRecordWithManager(this.manager);
-      console.debug('[updateCloudFromChangeLog] record: ', record);
-      if (record != null) {
-        try {
-          console.debug('[updateCloudFromChangeLog] stopping subscription');
-          this.unsubscribeRecord(record.constructor as typeof StoreRecord);
+    let drainFinished: () => void = () => undefined;
+    this.drainInFlight = new Promise<void>((resolve) => (drainFinished = resolve));
+    try {
+      const changes = await this.manager.getRepository(StoreChangeLog).find();
+      // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
+      for (const change of changes) {
+        console.debug('[updateCloudFromChangeLog], ', change);
+        const record = await change.getRecordWithManager(this.manager);
+        console.debug('[updateCloudFromChangeLog] record: ', record);
+        if (record != null) {
+          try {
+            console.debug('[updateCloudFromChangeLog] stopping subscription');
+            this.unsubscribeRecord(record.constructor as typeof StoreRecord);
 
-          console.debug('[updateCloudFromChangeLog] update store record');
-          const newRecord = await this.updateStoreRecord(record);
+            console.debug('[updateCloudFromChangeLog] update store record');
+            const newRecord = await this.updateStoreRecord(record);
 
-          console.debug('[updateCloudFromChangeLog] done, now remove change');
+            console.debug('[updateCloudFromChangeLog] done, now remove change');
+            await this.manager.remove(change);
+
+            console.debug('[updateCloudFromChangeLog] save local record');
+            await newRecord.saveWithManager(this.manager, { listeners: false }, false);
+
+            console.debug('[updateCloudFromChangeLog] starting subscription');
+            await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
+
+            console.debug('[updateCloudFromChangeLog] done removing change');
+          } catch (err) {
+            console.warn(err);
+          }
+        } else {
+          console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
           await this.manager.remove(change);
-
-          console.debug('[updateCloudFromChangeLog] save local record');
-          await newRecord.saveWithManager(this.manager, { listeners: false }, false);
-
-          console.debug('[updateCloudFromChangeLog] starting subscription');
-          await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
-
-          console.debug('[updateCloudFromChangeLog] done removing change');
-        } catch (err) {
-          console.warn(err);
         }
-      } else {
-        console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
-        await this.manager.remove(change);
       }
+    } finally {
+      this.drainInFlight = null;
+      drainFinished();
+      this.updatingCloudFromChangeLog = false;
     }
 
-    this.updatingCloudFromChangeLog = false;
     if (this.queueUpdateCloudFromChangeLog) {
       void this.updateCloudFromChangeLog().catch((e) =>
         console.warn('[updateCloudFromChangeLog] queued cloud push failed', e),
