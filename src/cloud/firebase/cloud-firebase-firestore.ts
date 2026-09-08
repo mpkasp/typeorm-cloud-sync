@@ -188,39 +188,57 @@ export class CloudFirebaseFirestore extends CloudStore {
       const collectionRef = collection(this.db, collectionPath);
 
       let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy('changeId'), limit(queryLimit));
-      let documentSnapshots = await getDocs(q);
-      console.debug(
-        `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
-      );
-      await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
-
-      while (documentSnapshots.size === queryLimit) {
-        const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
-        latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
-        q = query(
-          collectionRef,
-          where('changeId', '>', latestChangeId),
-          orderBy('changeId'),
-          startAfter(lastVisible),
-          limit(queryLimit),
-        );
-
-        documentSnapshots = await getDocs(q);
+      // The paged catch-up is bounded, so the indicator can be held across it. The wait for the first
+      // onSnapshot callback below deliberately is not counted: that handshake is the one the
+      // updateCloudFromChangeLog TODO reports as sometimes never resolving, and a refcount held on it
+      // would pin the indicator on and block every later cloud push.
+      await this.trackDownload(async () => {
+        let documentSnapshots = await getDocs(q);
         console.debug(
           `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
         );
         await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
-      }
 
-      const unsubscribe = onSnapshot(q, async (snapshot) => {
-        latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
-        await this.resolveSnapshot(obj, snapshot, latestChangeId, isPrivate, collectionPath);
-        // TODO: Handle downloading status
-        if (unresolved) {
-          console.debug('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
-          resolve();
-          unresolved = false;
+        while (documentSnapshots.size === queryLimit) {
+          const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
+          latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
+          q = query(
+            collectionRef,
+            where('changeId', '>', latestChangeId),
+            orderBy('changeId'),
+            startAfter(lastVisible),
+            limit(queryLimit),
+          );
+
+          documentSnapshots = await getDocs(q);
+          console.debug(
+            `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
+          );
+          await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
         }
+      });
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        // Everything that arrives after setup — including the backlog Firestore streams on reconnect —
+        // lands here. Counting it is what keeps the indicator up while that data is still being written.
+        // Each delivery reads its own changeId: two callbacks can overlap, and sharing the outer
+        // latestChangeId would let one clobber the other's cursor.
+        void this.trackDownload(async () => {
+          const changeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
+          await this.resolveSnapshot(obj, snapshot, changeId, isPrivate, collectionPath);
+        })
+          .catch((e) =>
+            console.warn('[CloudFirebaseFirestore - subscribeObj] failed applying snapshot', collectionPath, e),
+          )
+          .finally(() => {
+            // Settles the setup promise even when the first delivery failed; a throw here used to
+            // leave initialize() awaiting forever.
+            if (unresolved) {
+              console.debug('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
+              resolve();
+              unresolved = false;
+            }
+          });
       });
 
       this.firestoreSubscriptions[storeNameOf(objInstance)] = { record: obj, unsubscribe };

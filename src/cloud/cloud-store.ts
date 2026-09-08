@@ -71,6 +71,10 @@ export abstract class CloudStore {
     return this.userSubject.getValue();
   }
 
+  // `downloading` is a refcount rather than a flag because setup and live snapshot deliveries can be
+  // in flight at the same time. As a boolean, whichever finished first reported "done" while the
+  // others were still writing. Subscribers only see a transition when the count leaves or reaches 0.
+  private downloadCount: number = 0;
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
   public get downloading(): boolean {
@@ -86,6 +90,28 @@ export abstract class CloudStore {
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
+
+  // Hold the downloading indicator up for the duration of `work`. Nests: only the outermost pair emits.
+  protected async trackDownload<T>(work: () => Promise<T>): Promise<T> {
+    this.beginDownload();
+    try {
+      return await work();
+    } finally {
+      this.endDownload();
+    }
+  }
+
+  private beginDownload() {
+    if (this.downloadCount++ === 0) {
+      this.downloadingSubject.next(true);
+    }
+  }
+
+  private endDownload() {
+    if (this.downloadCount > 0 && --this.downloadCount === 0) {
+      this.downloadingSubject.next(false);
+    }
+  }
 
   // Note: Must be able to construct object to set up observables immediately at app runtime. We separate out
   //   initialzation so that we can asynchronously set up the cloud app, sqlite store, etc..
@@ -111,12 +137,16 @@ export abstract class CloudStore {
     // console.log('[CloudStore - initialize]', this.UserModel, user);
     this.userSubject.next(user);
     this.subscribeNetwork();
-    this.downloadingSubject.next(true);
-    await this.subscribePublicCloud();
-    if (user) {
-      await this.subscribePrivateCloud();
-    }
-    this.downloadingSubject.next(false);
+    await this.trackDownload(async () => {
+      await this.subscribePublicCloud();
+      if (user) {
+        await this.subscribePrivateCloud();
+      }
+    });
+    // Seed lastUser so the userSubject replay that subscribeLocalUser receives on subscribe is
+    // recognised as the user we just subscribed for. Otherwise it re-enters subscribePrivateCloud —
+    // a no-op behind its own guard — and flickers the indicator on and straight back off.
+    this.lastUser = user;
     this.subscribeLocalUser(); // Handles private cloud subscription
   }
 
@@ -192,10 +222,11 @@ export abstract class CloudStore {
       if (this.lastUser?.authId !== user?.authId) {
         if (user?.authId) {
           console.debug('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
-          this.downloadingSubject.next(true);
-          this.subscribePrivateCloud().then((_) => {
-            this.downloadingSubject.next(false);
-          });
+          // Fire-and-forget with its own catch: a rejected subscribe used to leave the indicator
+          // stuck on forever, which also blocked updateCloudFromChangeLog for the rest of the session.
+          void this.trackDownload(() => this.subscribePrivateCloud()).catch((e) =>
+            console.warn('[CloudStore - subscribeLocalUser] private cloud subscribe failed', e),
+          );
         } else {
           this.unsubscribePrivateCloud();
         }

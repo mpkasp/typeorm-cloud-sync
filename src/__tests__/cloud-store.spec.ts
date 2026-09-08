@@ -26,6 +26,23 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 
   throw new Error('timed out waiting for condition');
 }
 
+// trackDownload is protected: it is the seam the cloud adapters use to hold the downloading
+// indicator up, so the tests drive the indicator the same way a real delivery does.
+const trackDownload = <T>(work: () => Promise<T>): Promise<T> => (cloud as any).trackDownload(work);
+
+const deferred = () => {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve: () => resolve() };
+};
+
+// Subscribing to a BehaviorSubject replays its current value, so `seen[0]` is the state on subscribe.
+const recordDownloading = () => {
+  const seen: boolean[] = [];
+  cloud.downloading$.subscribe((value) => seen.push(value));
+  return seen;
+};
+
 const changeLogCount = () => changeLogs(dataSource).count();
 const seedUser = (init: Partial<any> = {}) => new User({ authId: AUTH_ID, ...init }).save({}, false);
 
@@ -143,12 +160,16 @@ describe('updateCloudFromChangeLog guards', () => {
 
   test('does nothing while downloading', async () => {
     await stageOffline(() => new Note({ text: 'mid download' }).save());
-    (cloud as any).downloadingSubject.next(true);
+    const download = deferred();
+    const tracked = trackDownload(() => download.promise);
 
     await cloud.updateCloudFromChangeLog();
 
     expect(cloud.calls).toEqual([]);
     expect(await changeLogCount()).toBeGreaterThan(0);
+
+    download.resolve();
+    await tracked;
   });
 
   test('does nothing before the private cloud is initialized', async () => {
@@ -349,5 +370,85 @@ describe('with the ActiveRecord global bound to another database', () => {
 
     const [, localArg] = resolve.mock.calls[0];
     expect((localArg as Note).text).toBe('local edit');
+  });
+});
+
+// The indicator is a refcount, not a flag. Setup and every live delivery can hold it at once, so a
+// download that finishes must not report "done" on behalf of the ones still writing.
+describe('downloading indicator', () => {
+  test('rises and settles exactly once over a warm start', async () => {
+    await seedUser();
+    const seen = recordDownloading();
+
+    await cloud.initialize(sqliteStore);
+
+    // The user replayed to subscribeLocalUser is the one setup already subscribed for, so it must
+    // not re-enter subscribePrivateCloud and flicker the indicator a second time.
+    expect(seen).toEqual([false, true, false]);
+    expect(cloud.calls.filter((call) => call === 'subscribePrivate:Note')).toHaveLength(1);
+  });
+
+  test('rises again for a delivery that arrives after setup', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    const seen = recordDownloading();
+
+    const delivery = deferred();
+    const applied = trackDownload(() => delivery.promise);
+    expect(cloud.downloading).toBe(true);
+
+    delivery.resolve();
+    await applied;
+
+    expect(cloud.downloading).toBe(false);
+    expect(seen).toEqual([false, true, false]);
+  });
+
+  test('a finished download does not clear one that is still in flight', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    const seen = recordDownloading();
+
+    const first = deferred();
+    const second = deferred();
+    const firstApplied = trackDownload(() => first.promise);
+    const secondApplied = trackDownload(() => second.promise);
+
+    first.resolve();
+    await firstApplied;
+    expect(cloud.downloading).toBe(true);
+
+    second.resolve();
+    await secondApplied;
+    expect(cloud.downloading).toBe(false);
+    expect(seen).toEqual([false, true, false]);
+  });
+
+  test('releases the indicator when a download fails', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+
+    await expect(trackDownload(() => Promise.reject(new Error('backend unreachable')))).rejects.toThrow(
+      'backend unreachable',
+    );
+
+    expect(cloud.downloading).toBe(false);
+  });
+
+  test('a settled download releases the cloud push it was blocking', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await waitFor(async () => (await changeLogCount()) === 0);
+
+    const download = deferred();
+    const applied = trackDownload(() => download.promise);
+    await stageOffline(() => new Note({ text: 'queued behind a download' }).save());
+    await cloud.updateCloudFromChangeLog();
+    expect(await changeLogCount()).toBeGreaterThan(0);
+
+    download.resolve();
+    await applied;
+
+    await waitFor(async () => (await changeLogCount()) === 0);
   });
 });
