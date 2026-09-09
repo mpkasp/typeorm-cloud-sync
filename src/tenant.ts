@@ -7,7 +7,12 @@ import { CloudStore } from './cloud/cloud-store';
 // a matter of holding N of these.
 export class Tenant {
   constructor(
-    public readonly authId: string,
+    // The local identity a consumer keys this account on. It is NOT the Firebase authId: an account
+    // can exist and be usable locally before a cloud account is minted for it, so a caretaker app
+    // keys managed accounts on a locally generated id (e.g. a grant UUID) that is available offline.
+    // The Firebase authId lives on the cloud store — see CloudStore.user.authId, read through
+    // PathBuilder.getAuthId() — and may differ from, or arrive after, this key.
+    public readonly key: string,
     public readonly localStore: SqliteStore,
     public readonly cloud: CloudStore,
   ) {}
@@ -23,7 +28,8 @@ export class Tenant {
 
 // Supplied by the app, which owns the pieces the library cannot build for it: the DataSource
 // (driver, entities, migrations) and the cloud binding (a FirebaseApp / FirestorePort per account).
-export type TenantOpener = (authId: string) => Promise<Tenant>;
+// `key` is the local account key (see Tenant.key), not the Firebase authId.
+export type TenantOpener = (key: string) => Promise<Tenant>;
 
 export class TenantRegistry {
   private readonly tenants = new Map<string, Tenant>();
@@ -33,47 +39,47 @@ export class TenantRegistry {
 
   // Idempotent: concurrent opens of the same account share one Tenant, so an account can never end
   // up with two DataSources over the same database.
-  async open(authId: string): Promise<Tenant> {
-    const existing = this.tenants.get(authId);
+  async open(key: string): Promise<Tenant> {
+    const existing = this.tenants.get(key);
     if (existing) {
       return existing;
     }
-    const pending = this.opening.get(authId);
+    const pending = this.opening.get(key);
     if (pending) {
       return pending;
     }
-    const creating = this.openTenant(authId)
+    const creating = this.openTenant(key)
       .then((tenant) => {
-        this.tenants.set(authId, tenant);
+        this.tenants.set(key, tenant);
         return tenant;
       })
-      .finally(() => this.opening.delete(authId));
-    this.opening.set(authId, creating);
+      .finally(() => this.opening.delete(key));
+    this.opening.set(key, creating);
     return creating;
   }
 
-  get(authId: string): Tenant | undefined {
-    return this.tenants.get(authId);
+  get(key: string): Tenant | undefined {
+    return this.tenants.get(key);
   }
 
-  has(authId: string): boolean {
-    return this.tenants.has(authId);
+  has(key: string): boolean {
+    return this.tenants.has(key);
   }
 
   list(): Tenant[] {
     return [...this.tenants.values()];
   }
 
-  async close(authId: string): Promise<void> {
-    const tenant = this.tenants.get(authId);
+  async close(key: string): Promise<void> {
+    const tenant = this.tenants.get(key);
     if (!tenant) {
       return;
     }
-    this.tenants.delete(authId);
+    this.tenants.delete(key);
     await tenant.dispose();
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all([...this.tenants.keys()].map((authId) => this.close(authId)));
+    await Promise.all([...this.tenants.keys()].map((key) => this.close(key)));
   }
 }

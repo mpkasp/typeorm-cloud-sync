@@ -44,13 +44,33 @@ afterEach(async () => {
   await registry.closeAll();
 });
 
-test('opens a tenant and looks it up by authId', async () => {
+test('opens a tenant and looks it up by key', async () => {
   const tenant = await registry.open('auth-A');
 
-  expect(tenant.authId).toBe('auth-A');
+  expect(tenant.key).toBe('auth-A');
   expect(registry.get('auth-A')).toBe(tenant);
   expect(registry.has('auth-A')).toBe(true);
   expect(registry.list()).toEqual([tenant]);
+});
+
+// Tenant.key is the local account key, not the Firebase authId. A managed account is created and
+// usable locally before a cloud account is minted for it, so the key (a locally generated id) and
+// the cloud authId are separate identities that can differ. The cloud authId lives on the cloud
+// store's user, reached through PathBuilder.getAuthId().
+test('keys the tenant on a local id independent of the cloud authId', async () => {
+  const dataSource: DataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+  const localStore = new SqliteStore(dataSource, User);
+  const cloud = new FakeCloudStore(User, [], [Note], new BehaviorSubject<boolean>(true));
+  await new User({ authId: 'firebase-uid' }).saveWithManager(dataSource.manager, {}, false);
+  await cloud.initialize(localStore);
+
+  const tenant = new Tenant('local-grant-key', localStore, cloud);
+  try {
+    expect(tenant.key).toBe('local-grant-key');
+    expect(tenant.cloud.user!.authId).toBe('firebase-uid');
+  } finally {
+    await tenant.dispose();
+  }
 });
 
 test('reopening returns the same tenant rather than a second DataSource', async () => {

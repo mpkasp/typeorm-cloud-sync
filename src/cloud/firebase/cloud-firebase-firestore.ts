@@ -37,6 +37,12 @@ export class CloudFirebaseFirestore extends CloudStore {
   private readonly paths = new PathBuilder(() => this.user?.authId);
   private writer!: StoreRecordWriter;
 
+  // Construction performs no I/O: it touches no Firestore handle, opens no listener, and reaches no
+  // network — it only wires up the observables (network$/user$/downloading$). getFirestore and every
+  // read/subscribe happen in initialize(), the sole network step. This is the guarantee local-first
+  // opening depends on: a Tenant can hold an unconnected CloudFirebaseFirestore and be fully usable
+  // offline, with the cloud attached later by a single initialize() call. Pinned by
+  // cloud-firebase-firestore.construction.spec.ts — keep any network touch out of this path.
   constructor(
     protected UserModel: typeof BaseUser,
     protected publicRecords: typeof StoreRecord[],

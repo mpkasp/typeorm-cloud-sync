@@ -31,7 +31,7 @@ const notesIn = (tenant: Tenant) => tenant.localStore.dataSource.getRepository(N
 
 // Stage a local change without the automatic push, so a test drives the drain itself.
 const stageOffline = async <T>(tenant: Tenant, save: () => Promise<T>): Promise<T> => {
-  const network = networks.get(tenant.authId)!;
+  const network = networks.get(tenant.key)!;
   network.next(false);
   try {
     return await save();
