@@ -1,7 +1,7 @@
 {
   "name": "typeorm-cloud-sync",
   "version": "2.0.0",
-  "description": "Sync Sqlite data to Firebase Firestore",
+  "description": "Local-first sync between a TypeORM SQLite database and a cloud backend (Firestore today, more planned)",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -17,8 +17,8 @@
     "postversion": "git push && git push --tags"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Michael Kasparian",
+  "license": "MIT",
   "files": [
     "lib/**/*"
   ],
