@@ -4,6 +4,7 @@ import {
   BeforeUpdate,
   Column, DataSource,
   EntityManager,
+  EntitySchema,
   Index,
   ObjectType,
   PrimaryGeneratedColumn,
@@ -13,6 +14,17 @@ import { StoreChangeLog } from './store-change-log.model';
 import {EntityTarget} from 'typeorm/browser';
 import { storeNameOf } from './store-name';
 import { activeRecordManager } from './active-record';
+
+// Narrow whatever a caller passed — a class, an instance, or a `{type, name}` descriptor wrapping
+// either — down to a valid repository target. A string name, class, or EntitySchema is already one;
+// only a record instance needs narrowing to its constructor.
+function entityClassOf(target: any): any {
+  const candidate = target && typeof target === 'object' && 'type' in target ? target.type : target;
+  if (typeof candidate === 'string' || typeof candidate === 'function' || candidate instanceof EntitySchema) {
+    return candidate;
+  }
+  return candidate?.constructor;
+}
 
 export abstract class StoreRecord extends BaseEntity {
   // Stable storage identity, immune to class-name mangling by bundlers.
@@ -49,16 +61,23 @@ export abstract class StoreRecord extends BaseEntity {
     Object.assign(this, init);
   }
 
-  static async getLatestRecord(dataSource: DataSource, obj: EntityTarget<StoreRecord>, objectName: string, isPrivate: boolean) {
-    const isPrivateQuery = isPrivate ? 1 : 0;
-    const query = dataSource.getRepository(obj).createQueryBuilder()
-        .where(`${objectName}.isPrivate = ${isPrivateQuery}`)
-        .orderBy('changeId', 'DESC');
+  // Resolve the repository from the entity class with a fixed query alias.
+  //
+  // TypeORM matches a string / `{name}` target against the entity's class name or table name — never
+  // against `storeName`. Since a production build mangles class names, callers pass a mix of classes,
+  // instances and `{type, name}` descriptors; `entityClassOf` normalises them to a target the
+  // repository can resolve regardless of mangling.
+  static async getLatestRecord(dataSource: DataSource, obj: EntityTarget<StoreRecord>, isPrivate: boolean) {
+    const alias = 'record';
+    const query = dataSource.getRepository(entityClassOf(obj))
+        .createQueryBuilder(alias)
+        .where(`${alias}.isPrivate = :isPrivate`, { isPrivate: isPrivate ? 1 : 0 })
+        .orderBy(`${alias}.changeId`, 'DESC');
     return await query.getOne();
   }
 
-  static async getLatestChangeId(dataSource: DataSource, obj: EntityTarget<StoreRecord>, objectName: string, isPrivate: boolean): Promise<number> {
-    const latestObj = (await this.getLatestRecord(dataSource, obj, objectName, isPrivate)) as StoreRecord;
+  static async getLatestChangeId(dataSource: DataSource, obj: EntityTarget<StoreRecord>, isPrivate: boolean): Promise<number> {
+    const latestObj = (await this.getLatestRecord(dataSource, obj, isPrivate)) as StoreRecord;
     return latestObj ? latestObj.changeId : 0;
   }
 

@@ -106,10 +106,33 @@ describe('StoreRecord.updateChangeLog', () => {
 
 describe('StoreRecord.getLatestChangeId', () => {
   const latestChangeId = (isPrivate: boolean) =>
-    StoreRecord.getLatestChangeId(dataSource, { type: Note as any, name: 'Note' }, 'Note', isPrivate);
+    StoreRecord.getLatestChangeId(dataSource, { type: Note as any, name: 'Note' }, isPrivate);
 
   test('is 0 for an empty store', async () => {
     await expect(latestChangeId(true)).resolves.toBe(0);
+  });
+
+  // TypeORM matches a `{name}` target against the class or table name, never against `storeName`. A
+  // production build mangles the class name, so the cloud store's descriptor matches neither; the
+  // descriptor's `type` must resolve the entity instead.
+  test('resolves the entity when its storeName matches neither class nor table name', async () => {
+    await new Note({ text: 'a', changeId: 5 }).save({}, false);
+
+    // A minified build would report a name like 'nl' for Note; a name that matches nothing
+    // reproduces that without a bundler.
+    const mangled = { type: Note as any, name: 'nl' };
+    await expect(
+      StoreRecord.getLatestChangeId(dataSource, mangled, true),
+    ).resolves.toBe(5);
+  });
+
+  // The cloud store hands this method a record INSTANCE, not the class.
+  test('accepts a record instance as the target', async () => {
+    const note = await new Note({ text: 'a', changeId: 9 }).save({}, false);
+
+    await expect(
+      StoreRecord.getLatestChangeId(dataSource, { type: note as any, name: 'nl' }, true),
+    ).resolves.toBe(9);
   });
 
   test('returns the highest changeId of the matching privacy', async () => {

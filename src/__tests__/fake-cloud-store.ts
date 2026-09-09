@@ -56,7 +56,6 @@ export class FakeCloudStore extends CloudStore {
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
           { type: obj as any, name: storeNameOf(obj) },
-          storeNameOf(obj),
           obj.isPrivate,
         ),
     });

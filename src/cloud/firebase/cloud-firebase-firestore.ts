@@ -80,7 +80,6 @@ export class CloudFirebaseFirestore extends CloudStore {
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
           { type: obj as any, name: storeNameOf(obj) },
-          storeNameOf(obj),
           obj.isPrivate,
         ),
     });
@@ -177,8 +176,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
-    const objectName = obj.name;
-    let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
+    let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -201,7 +199,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
         while (documentSnapshots.size === queryLimit) {
           const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
-          latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
+          latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
           q = query(
             collectionRef,
             where('changeId', '>', latestChangeId),
@@ -224,7 +222,7 @@ export class CloudFirebaseFirestore extends CloudStore {
         // Each delivery reads its own changeId: two callbacks can overlap, and sharing the outer
         // latestChangeId would let one clobber the other's cursor.
         void this.trackDownload(async () => {
-          const changeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, objectName, isPrivate);
+          const changeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
           await this.resolveSnapshot(obj, snapshot, changeId, isPrivate, collectionPath);
         })
           .catch((e) =>
@@ -321,19 +319,44 @@ export class CloudFirebaseFirestore extends CloudStore {
     // console.log('[CloudFirebaseFirestore] ', docPath, docRef);
     return new Promise<void>((resolve) => {
       let unresolved = true;
-      const unsubscribe = onSnapshot(docRef, async (snapshot) => {
-        const data = this.deserialize(snapshot.data(), snapshot.id, true);
-        delete data.id; // Only do this on user...
-        const currentUser = this.user;
-        console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
-        const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-        await updatedUser.saveWithManager(this.manager, {}, false);
-
+      // Settle exactly once, however the snapshot turns out. initialize() awaits this promise and
+      // gates privateCloudInitialized — and so the entire change-log drain — on it, so a path that
+      // never resolves stalls the store's uploads permanently, not just a download. A newly created
+      // account has no /User document yet, so the snapshot arrives with no data and the merge must
+      // not be allowed to leave the promise pending.
+      const settle = () => {
         if (unresolved) {
-          resolve();
           unresolved = false;
+          resolve();
         }
-      });
+      };
+
+      const unsubscribe = onSnapshot(
+        docRef,
+        async (snapshot) => {
+          try {
+            if (snapshot.exists()) {
+              const data = this.deserialize(snapshot.data(), snapshot.id, true);
+              delete data.id; // Only do this on user...
+              const currentUser = this.user;
+              console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
+              const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
+              await updatedUser.saveWithManager(this.manager, {}, false);
+            } else {
+              // Nothing in the cloud yet: the local record is the only copy, and the drain uploads it.
+              console.debug('[CloudFirebaseFirestore - subscribeCloudUser] no cloud user document yet');
+            }
+          } catch (error) {
+            console.warn('[CloudFirebaseFirestore - subscribeCloudUser] could not apply cloud user', error);
+          } finally {
+            settle();
+          }
+        },
+        (error) => {
+          console.warn('[CloudFirebaseFirestore - subscribeCloudUser] user subscription failed', error);
+          settle();
+        },
+      );
       this.firestoreSubscriptions['User'] = { record: BaseUser, unsubscribe };
     });
   }
