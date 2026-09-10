@@ -182,7 +182,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
-    let latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+    const latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -198,27 +198,43 @@ export class CloudFirebaseFirestore extends CloudStore {
       // would pin the indicator on and block every later cloud push.
       await this.trackDownload(async () => {
         let documentSnapshots = await getDocs(q);
-        console.debug(
-          `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
-        );
-        await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
+        while (true) {
+          // Fetch the next page before writing this one, so the Firestore round trip overlaps the
+          // local write instead of running after it. Pages are still applied strictly in order —
+          // only one resolveSnapshot runs at a time — so conflict resolution is unchanged.
+          // startAfter(lastVisible) is a stable changeId cursor, so the documents fetched are exactly
+          // those a serial paged read would return; the original per-page changeId recompute was a
+          // redundant floor (startAfter already excludes everything written) and is dropped so the
+          // prefetch need not wait on the write to finish.
+          const morePages = documentSnapshots.size === queryLimit;
+          const nextQuery = morePages
+            ? query(
+                collectionRef,
+                where('changeId', '>', latestChangeId),
+                orderBy('changeId'),
+                startAfter(documentSnapshots.docs[documentSnapshots.docs.length - 1]),
+                limit(queryLimit),
+              )
+            : null;
+          const nextSnapshots = nextQuery ? getDocs(nextQuery) : null;
+          // If resolveSnapshot below throws, the loop exits without ever awaiting nextSnapshots. A
+          // rejection on that abandoned promise would otherwise be unhandled — the .catch here just
+          // marks it observed; the real value/error is still delivered to "await nextSnapshots!" when
+          // the loop continues normally.
+          nextSnapshots?.catch(() => undefined);
 
-        while (documentSnapshots.size === queryLimit) {
-          const lastVisible = documentSnapshots.docs[documentSnapshots.docs.length - 1]; // Get cursor
-          latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
-          q = query(
-            collectionRef,
-            where('changeId', '>', latestChangeId),
-            orderBy('changeId'),
-            startAfter(lastVisible),
-            limit(queryLimit),
-          );
-
-          documentSnapshots = await getDocs(q);
           console.debug(
             `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
           );
           await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
+
+          if (!nextQuery) {
+            break;
+          }
+          // Keep q pointing at the query that fetched the page we just applied, so the live
+          // onSnapshot below subscribes from the same cursor the serial version ended on.
+          q = nextQuery;
+          documentSnapshots = await nextSnapshots!;
         }
       });
 

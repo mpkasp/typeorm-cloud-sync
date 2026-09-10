@@ -72,8 +72,11 @@ flowchart LR
    versioned write protocol, which allocates the next `changeId` inside a transaction and bumps the
    collection's `Meta` document.
 3. **Cloud changes** stream in over Firestore `onSnapshot` subscriptions. Only records with a
-   `changeId` greater than the highest one already stored locally are fetched, then merged into
-   SQLite by `SqliteStore.resolve` using last-write-wins on the record's `updated` timestamp.
+   `changeId` greater than the highest one already stored locally are fetched. Records with a pending
+   local change are merged by `SqliteStore.resolve` using last-write-wins on the record's `updated`
+   timestamp; the rest — the whole page on an initial login — have no local edit to protect and are
+   written to SQLite in a single chunked bulk save, so a large first download is a handful of writes
+   rather than one round-trip per record.
 
 The library never blocks a local commit on the network. The change log is the source of truth for
 "what still needs to go up," so a dropped connection or a crash only changes *when* the cloud catches

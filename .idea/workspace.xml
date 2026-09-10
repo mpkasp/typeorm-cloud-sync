@@ -41,61 +41,61 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.966339029933403" />
-      <entry key="MS500" value="5.453410718494919" />
-      <entry key="S2" value="7.836162902659082" />
-      <entry key="S5" value="8.505707993083062" />
-      <entry key="S10" value="8.747756132380186" />
-      <entry key="S30" value="8.951845325563156" />
-      <entry key="S60" value="10.70363421096847" />
-      <entry key="M2" value="22.114586170544403" />
-      <entry key="M5" value="58.239527811534664" />
-      <entry key="M10" value="93.26338754438662" />
-      <entry key="M15" value="112.26618936280208" />
-      <entry key="M30" value="138.43399075109858" />
-      <entry key="H1" value="175.43216240937554" />
-      <entry key="H2" value="275.2033529738483" />
-      <entry key="H4" value="423.3682994784112" />
-      <entry key="D1" value="679.4775576934013" />
-      <entry key="W1" value="743.5721791072501" />
+      <entry key="MS100" value="1.7686419464266825" />
+      <entry key="MS500" value="5.1322232125104685" />
+      <entry key="S2" value="13.672381932787456" />
+      <entry key="S5" value="31.20107681902959" />
+      <entry key="S10" value="54.519780294998526" />
+      <entry key="S30" value="91.46060453705863" />
+      <entry key="S60" value="106.42924856559979" />
+      <entry key="M2" value="116.17495218234778" />
+      <entry key="M5" value="133.79142403342865" />
+      <entry key="M10" value="154.70925545886382" />
+      <entry key="M15" value="168.3501160874093" />
+      <entry key="M30" value="190.74941821410653" />
+      <entry key="H1" value="208.20038903414888" />
+      <entry key="H2" value="219.46965238928556" />
+      <entry key="H4" value="227.3772077565364" />
+      <entry key="D1" value="385.3697161940775" />
+      <entry key="W1" value="1163.8323486829306" />
     </decayedCancelled>
     <decayedSelected>
-      <entry key="MS100" value="0.0" />
-      <entry key="MS500" value="0.0" />
-      <entry key="S2" value="0.0" />
-      <entry key="S5" value="0.0" />
-      <entry key="S10" value="0.0" />
-      <entry key="S30" value="2.9950665105616662E-155" />
-      <entry key="S60" value="5.472720082885323E-78" />
-      <entry key="M2" value="2.339384552160101E-39" />
-      <entry key="M5" value="3.5289105256539323E-16" />
-      <entry key="M10" value="1.8785394660889935E-8" />
-      <entry key="M15" value="7.066649464789856E-6" />
-      <entry key="M30" value="0.0026583170361696522" />
-      <entry key="H1" value="0.05155886961687249" />
-      <entry key="H2" value="0.2270657825760465" />
-      <entry key="H4" value="0.47651419976328824" />
-      <entry key="D1" value="0.8837836736417966" />
-      <entry key="W1" value="0.9825058370925857" />
+      <entry key="MS100" value="1.9619924584457937E-79" />
+      <entry key="MS500" value="1.81359147946041E-16" />
+      <entry key="S2" value="1.1604725356809268E-4" />
+      <entry key="S5" value="0.026659619501797897" />
+      <entry key="S10" value="0.16327773731221837" />
+      <entry key="S30" value="0.5465656378271646" />
+      <entry key="S60" value="0.7393007762928986" />
+      <entry key="M2" value="0.8598263012774747" />
+      <entry key="M5" value="0.9437918470941653" />
+      <entry key="M10" value="1.0193733448818716" />
+      <entry key="M15" value="1.1142007397489464" />
+      <entry key="M30" value="1.3562280505337352" />
+      <entry key="H1" value="1.6001609960833478" />
+      <entry key="H2" value="1.7754212660047033" />
+      <entry key="H4" value="1.881651093908042" />
+      <entry key="D1" value="2.5925696423208153" />
+      <entry key="W1" value="5.854834648133589" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.899283726517687" />
-      <entry key="MS500" value="5.405452797896321" />
-      <entry key="S2" value="7.818438087571636" />
-      <entry key="S5" value="8.497989202600774" />
-      <entry key="S10" value="8.743783823917742" />
-      <entry key="S30" value="8.950489693006991" />
-      <entry key="S60" value="10.702808165429426" />
-      <entry key="M2" value="22.11365940394103" />
-      <entry key="M5" value="58.238480120544416" />
-      <entry key="M10" value="93.26252882510849" />
-      <entry key="M15" value="112.26550195898074" />
-      <entry key="M30" value="138.43621561066993" />
-      <entry key="H1" value="175.48343007257998" />
-      <entry key="H2" value="275.43017100227615" />
-      <entry key="H4" value="423.84461703767613" />
-      <entry key="D1" value="680.3612883446127" />
-      <entry key="W1" value="744.5546766585214" />
+      <entry key="MS100" value="1.7053409907993657" />
+      <entry key="MS500" value="5.08594745441242" />
+      <entry key="S2" value="13.64560832825979" />
+      <entry key="S5" value="31.20240213987168" />
+      <entry key="S10" value="54.65170433803472" />
+      <entry key="S30" value="91.98146344482016" />
+      <entry key="S60" value="107.15197274239513" />
+      <entry key="M2" value="117.02528284625784" />
+      <entry key="M5" value="134.73085226864762" />
+      <entry key="M10" value="155.72615822159577" />
+      <entry key="M15" value="169.4625242509517" />
+      <entry key="M30" value="192.10461008970935" />
+      <entry key="H1" value="209.79997084616764" />
+      <entry key="H2" value="221.2447632779178" />
+      <entry key="H4" value="229.2586968476237" />
+      <entry key="D1" value="387.9622413679832" />
+      <entry key="W1" value="1169.6871669615095" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -118,6 +118,7 @@
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
     "git-widget-placeholder": "main",
+    "javascript.preferred.runtime.type.id": "node",
     "junie.onboarding.icon.badge.shown": "true",
     "last_opened_file_path": "/Users/mike/Code/mpkasp/typeorm-cloud-sync",
     "node.js.detected.package.eslint": "true",
@@ -126,6 +127,7 @@
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs.jest.jest_package": "/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/jest",
     "nodejs_package_manager_path": "npm",
+    "npm.test.executor": "Run",
     "to.speed.mode.migration.done": "true",
     "ts.external.directory.path": "/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/typescript/lib",
     "vue.rearranger.settings.migration": "true"
@@ -142,7 +144,7 @@
       <recent name="$PROJECT_DIR$/src/cloud" />
     </key>
   </component>
-  <component name="RunManager" selected="Jest.Test Firestore Initialization">
+  <component name="RunManager" selected="npm.test">
     <configuration name="Test Firestore Initialization" type="JavaScriptTestRunnerJest" temporary="true" nameIsGenerated="true">
       <node-interpreter value="project" />
       <jest-package value="$PROJECT_DIR$/node_modules/jest" />
@@ -197,11 +199,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Jest.Test Firestore Initialization" />
         <item itemvalue="npm.test" />
         <item itemvalue="npm.prepare" />
         <item itemvalue="npm.lint" />
         <item itemvalue="npm.format" />
+        <item itemvalue="Jest.Test Firestore Initialization" />
       </list>
     </recent_temporary>
   </component>
@@ -231,6 +233,7 @@
       <workItem from="1784565484422" duration="3452000" />
       <workItem from="1784852276824" duration="412000" />
       <workItem from="1788400674773" duration="905000" />
+      <workItem from="1788452315104" duration="29456000" />
     </task>
     <servers />
   </component>

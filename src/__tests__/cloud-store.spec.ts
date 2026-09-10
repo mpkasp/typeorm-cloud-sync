@@ -322,6 +322,9 @@ describe('resolveRecord', () => {
   });
 
   test('resolveRecords keeps only the records that changed', async () => {
+    // Both ids have a pending local change, so they take the per-record conflict path where resolve
+    // decides what to keep. Without a pending change they would take the bulk save path instead.
+    await dataSource.manager.save([new StoreChangeLog('Note', 'a'), new StoreChangeLog('Note', 'b')]);
     jest
       .spyOn(sqliteStore, 'resolve')
       .mockResolvedValueOnce(new Note({ text: 'kept' }))
@@ -330,6 +333,18 @@ describe('resolveRecord', () => {
     const resolved = await (cloud as any).resolveRecords(Note, [new Note({ id: 'a' }), new Note({ id: 'b' })]);
 
     expect(resolved).toHaveLength(1);
+  });
+
+  test('resolveRecords bulk-saves clean cloud records without the per-record resolve path', async () => {
+    const resolve = jest.spyOn(sqliteStore, 'resolve');
+    const incoming = Array.from({ length: 5 }, (_, i) => new Note({ id: `note-${i}`, text: `n${i}` }));
+
+    const resolved = await (cloud as any).resolveRecords(Note, incoming);
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(resolved).toHaveLength(5);
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(5);
+    await expect(changeLogCount()).resolves.toBe(0);
   });
 });
 

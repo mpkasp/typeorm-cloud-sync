@@ -137,3 +137,62 @@ describe('subscribeObj live deliveries', () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe('subscribeObj paged catch-up', () => {
+  const QUERY_LIMIT = 500;
+
+  // Drives an initial download over a scripted sequence of getDocs pages, recording how many getDocs
+  // calls had been issued at the moment each page began writing locally.
+  const runPagedDownload = async (pages: Record<string, any>[][]) => {
+    (getDocs as jest.Mock).mockClear();
+    for (const page of pages) {
+      (getDocs as jest.Mock).mockResolvedValueOnce(snapshotOf(page));
+    }
+
+    const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+    const pagedCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+
+    const getDocsCallsAtWrite: number[] = [];
+    const resolveSnapshot = (pagedCloud as any).resolveSnapshot.bind(pagedCloud);
+    jest.spyOn(pagedCloud as any, 'resolveSnapshot').mockImplementation(async (...args: any[]) => {
+      getDocsCallsAtWrite.push((getDocs as jest.Mock).mock.calls.length);
+      return resolveSnapshot(...args);
+    });
+
+    await pagedCloud.initialize(new SqliteStore(ds, User), {} as any);
+    await pagedCloud.whenIdle();
+    return { ds, pagedCloud, getDocsCallsAtWrite };
+  };
+
+  test('writes every record across pages and prefetches the next page before writing the current one', async () => {
+    const fullPage = Array.from({ length: QUERY_LIMIT }, (_, i) => tagDoc(`t${i}`, i + 1));
+    const lastPage = [tagDoc('t500', 501), tagDoc('t501', 502), tagDoc('t502', 503)];
+
+    const { ds, pagedCloud, getDocsCallsAtWrite } = await runPagedDownload([fullPage, lastPage]);
+
+    try {
+      // Correctness: no records dropped or duplicated across the page boundary.
+      expect(await ds.getRepository(Tag).count()).toBe(503);
+      // Two pages fetched, no extra round trips.
+      expect((getDocs as jest.Mock).mock.calls.length).toBe(2);
+      // Pipelining: the second page was already fetched by the time the first began writing. A serial
+      // read (fetch, then write, then fetch) would record 1 here.
+      expect(getDocsCallsAtWrite[0]).toBe(2);
+    } finally {
+      pagedCloud.dispose();
+      await ds.destroy();
+    }
+  });
+
+  test('a single short page issues no extra fetch', async () => {
+    const { ds, pagedCloud } = await runPagedDownload([[tagDoc('only', 1)]]);
+
+    try {
+      expect(await ds.getRepository(Tag).count()).toBe(1);
+      expect((getDocs as jest.Mock).mock.calls.length).toBe(1);
+    } finally {
+      pagedCloud.dispose();
+      await ds.destroy();
+    }
+  });
+});

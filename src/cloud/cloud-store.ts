@@ -3,7 +3,7 @@ import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
 
-import { DataSource, EntityManager, EntitySubscriberInterface } from 'typeorm/browser';
+import { DataSource, EntityManager, EntitySubscriberInterface, In } from 'typeorm/browser';
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUserSubscriber } from '../base-user.subscriber';
@@ -363,17 +363,49 @@ export abstract class CloudStore {
     }
   }
 
-  // Resolve a list of records
+  // Apply a page of records from the cloud. Records with a pending local change go through the
+  // per-record conflict path; the rest have no local edit to protect, so the cloud copy simply wins
+  // and they are written in a single chunked, transactional bulk save instead of one round-trip each.
+  // On an initial login the change log is empty, so the whole page takes the bulk path — the
+  // difference between ~2 writes and ~1000 read/write round-trips for a 500-record page.
   protected async resolveRecords(recordType: typeof StoreRecord, objs: StoreRecord[]) {
-    const resolvedRecords: StoreRecord[] = [];
+    if (objs.length === 0) {
+      return [];
+    }
+
+    const pendingIds = await this.pendingChangeIds(objs);
+    const clean: StoreRecord[] = [];
+    const conflicted: StoreRecord[] = [];
     for (const obj of objs) {
-      // Only need to resolve issues if there's also a local change pending...
+      (pendingIds.has(obj.id as string) ? conflicted : clean).push(obj);
+    }
+
+    const resolvedRecords: StoreRecord[] = [];
+    if (clean.length > 0) {
+      // Cloud-origin data, so no change-log rows are written (this is not a local edit). Listeners
+      // stay on: the @BeforeInsert/@BeforeUpdate hooks that populate createdMs/updatedMs run through
+      // them, and the cloud subscribers do not listen to these record types.
+      const saved = await this.manager.save(clean, { chunk: 500 });
+      resolvedRecords.push(...(saved as unknown as StoreRecord[]));
+    }
+    for (const obj of conflicted) {
       const resolvedRecord = await this.resolveRecord(recordType, obj);
       if (resolvedRecord !== null) {
         resolvedRecords.push(resolvedRecord);
       }
     }
     return resolvedRecords;
+  }
+
+  // One query for the whole page's pending change-log rows, replacing the per-record findOne that
+  // dominated large initial downloads.
+  private async pendingChangeIds(objs: StoreRecord[]): Promise<Set<string>> {
+    const ids = objs.map((obj) => obj.id).filter((id): id is string => id != null);
+    if (ids.length === 0) {
+      return new Set();
+    }
+    const changes = await this.manager.getRepository(StoreChangeLog).find({ where: { recordId: In(ids) } });
+    return new Set(changes.map((change) => change.recordId));
   }
 
   // Helper to call proper resolve function when a new object is received from the cloud
