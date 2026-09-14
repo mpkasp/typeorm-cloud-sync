@@ -6,16 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CLAUDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/CLAUDE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/cloud-store.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/cloud-store.spec.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/fake-cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/fake-cloud-store.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/tenant.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/tenant.spec.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/protocol/__tests__/store-record-writer.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/protocol/__tests__/store-record-writer.spec.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/protocol/store-record-writer.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/protocol/store-record-writer.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

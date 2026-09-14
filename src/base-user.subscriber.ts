@@ -20,7 +20,9 @@ export class BaseUserSubscriber implements EntitySubscriberInterface<BaseUser> {
   }
 
   afterUpdate(event: UpdateEvent<BaseUser>) {
-    const user = event.databaseEntity;
+    // databaseEntity is the row as loaded before the update. entity is the saved object, or only the
+    // changed columns for a query-builder update, so it is laid over the loaded row.
+    const user = Object.assign(new this.UserModel(), event.databaseEntity, event.entity);
     // console.log('[BaseUserSubscriber - afterUpdate]', user, this.cloudStore);
     if (this.cloudStore?.userSubject) {
       this.cloudStore.userSubject.next(user);

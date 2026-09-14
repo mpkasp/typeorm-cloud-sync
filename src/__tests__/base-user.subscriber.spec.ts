@@ -35,13 +35,24 @@ test('publishes an inserted user to the cloud store', () => {
   expect(cloud.user).toBe(user);
 });
 
-test('publishes the pre-update row on update, not the new one', () => {
+test('publishes the updated user on update, stored fields overlaid with the changes', () => {
   const stored = new User({ authId: 'auth-A', displayName: 'Before' });
-  const incoming = new User({ authId: 'auth-A', displayName: 'After' });
+  const incoming = { displayName: 'After' };
 
   subscriber.afterUpdate({ entity: incoming, databaseEntity: stored } as any);
 
-  expect(cloud.user).toBe(stored);
+  expect(cloud.user).toBeInstanceOf(User);
+  expect(cloud.user!.authId).toBe('auth-A');
+  expect(cloud.user!.displayName).toBe('After');
+});
+
+test('a saved user change reaches the cloud store with the new values', async () => {
+  const user = await new User({ authId: 'auth-A', displayName: 'Before' }).save({}, false);
+  user.displayName = 'After';
+
+  await user.save({}, false);
+
+  expect(cloud.user!.displayName).toBe('After');
 });
 
 test('is a no-op without a cloud store', () => {
