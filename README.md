@@ -69,12 +69,16 @@ flowchart LR
    row naming the changed record.
 2. **On transaction commit**, `StoreChangeLogSubscriber` triggers a background drain
    (`CloudStore.updateCloudFromChangeLog`). Each pending change is written to Firestore through the
-   versioned write protocol, which allocates the next `changeId` inside a transaction and bumps the
-   collection's `Meta` document.
-3. **Cloud changes** stream in over Firestore `onSnapshot` subscriptions. Each collection keeps a
+   versioned write protocol, which reads the collection's `Meta` document and the record's cloud copy
+   inside one transaction, allocates the next `changeId` and bumps `Meta`. If the cloud copy carries a
+   newer `updatedMs`, the write is skipped and the drain stores that copy locally instead, so local
+   equals cloud either way.
+3. **Cloud changes** arrive as a paged catch-up followed by a live `onSnapshot` listener that
+   consumes only the snapshot's added and modified documents. Each collection keeps a
    download cursor in the local `Meta` table: the highest `changeId` the cloud has delivered and the
    device has applied. Only records above it are fetched. Uploads never move it, so a document another
-   device wrote below a locally uploaded `changeId` still arrives. Records with a pending
+   device wrote below a locally uploaded `changeId` still arrives. A document whose `changeId` is not
+   above the local row's is dropped before it is written. Records with a pending
    local change are merged by `SqliteStore.resolve` using last-write-wins on the record's `updated`
    timestamp; the rest — the whole page on an initial login — have no local edit to protect and are
    written to SQLite in a single chunked bulk save, so a large first download is a handful of writes
@@ -159,8 +163,8 @@ import { SqliteStore, StoreChangeLog } from 'typeorm-cloud-sync';
 const dataSource = new DataSource({
   type: 'capacitor', // or 'sqljs' in tests, etc.
   // ...driver options...
-  entities: [User, Note, StoreChangeLog],
-  synchronize: true,
+  entities: [User, Note, StoreChangeLog, Meta],
+  synchronize: true, // or migrations: see "The change log" for the ones this package exports
 });
 await dataSource.initialize();
 
@@ -242,15 +246,29 @@ created before download cursors needs `MetaCursorIdentity1789400000000`, unless 
 You declare which is which when constructing the cloud store (the second and third constructor
 arguments). A record's own `isPrivate` flag must match the list it's registered under.
 
+**List a record after the records it references.** Collections are fetched concurrently but their
+catch-up pages are stored in the declared order, so a row with a foreign key to another collection
+never arrives before the row it points at. A live delivery that still cannot be stored (its
+referenced row is in another listener's next delivery) is retried after the next delivery that
+succeeds, and its collection's cursor does not move until it is stored.
+
 ### Conflict resolution
 
 When a cloud record arrives, `SqliteStore.resolve` decides the winner:
 
 - No local copy → insert the cloud record.
-- Timestamps differ → **last-write-wins** on `updated`. If the cloud copy is newer, it overwrites
-  local and any stale change-log entry is dropped; if local is newer, local is kept and re-queued
-  for upload.
+- Timestamps differ → **last-write-wins** on `updated`. If the cloud copy is newer, the pending
+  change-log row is deleted by id and version and the cloud copy saved in the same transaction; an
+  edit that landed since keeps its row and the cloud copy is discarded. If local is newer, local is
+  kept and its row's version bumped so it uploads again.
 - Equal timestamps → no-op.
+
+The upload side applies the same rule: the writer skips a record whose cloud copy has a newer
+`updatedMs`, and the drain stores that copy locally in place of the change it did not upload.
+
+Cloud-origin saves run with entity listeners off, so `@BeforeInsert`/`@BeforeUpdate` hooks never
+overwrite the timestamps a document carries, and your own entity subscribers do not fire for them.
+Subscribe to `applied$` instead (see Reactive state).
 
 ### Reactive state
 
@@ -261,6 +279,9 @@ When a cloud record arrives, `SqliteStore.resolve` decides the winner:
 | `network$`       | Online/offline state (defaults to browser `online`/`offline`).    |
 | `user$`          | The current local `BaseUser`, or `null` when signed out.          |
 | `downloading$`   | `true` while a cloud download/backfill is in flight.              |
+| `applied$`       | `{ recordType, count }` after cloud-origin rows were written locally (a re-delivery that changed nothing does not emit). |
+| `pending$`       | Number of change-log rows not yet uploaded; recounted on commit, drain and apply. Call `refreshPending()` after deleting rows yourself. |
+| `lastError$`     | The most recent failed upload or private-cloud subscribe (`UploadTimeoutError`, a Firestore error), `null` once one succeeds. |
 
 Network state can be injected as an `Observable<boolean>` (fourth constructor argument) so the store
 can be built off-browser, e.g. in tests or SSR.
@@ -354,11 +375,12 @@ a `StoreRecord`, since the server has no access to your TypeORM entity classes).
 
 ## Lifecycle & disposal
 
-- `CloudStore.dispose()` detaches subscribers and unsubscribes from the private cloud, releasing the
-  store's hold on its `DataSource` without touching other tenants.
-- `CloudStore.whenIdle(timeoutMs = 5000)` resolves once no change-log drain is in flight, so you can
-  tear down a `DataSource` without pulling it out from under an in-flight write. It is bounded, so a
-  stuck cloud call cannot block disposal forever.
+- `CloudStore.dispose()` marks the store disposed, detaches subscribers, unsubscribes from the
+  private cloud and completes `applied$`, `pending$` and `lastError$`. Work already queued on the
+  transaction lock finds the flag set and does nothing.
+- `CloudStore.whenIdle(timeoutMs = 5000)` resolves once no drain, download or serialized local
+  transaction is in flight, so you can tear down a `DataSource` without pulling it out from under one.
+  It is bounded, so a stuck cloud call cannot block disposal forever.
 - `Tenant.dispose()` orders this correctly: it stops the cloud, waits for quiescence, then destroys
   the `DataSource`.
 - `CloudStore.resetLocalUser()` clears the current user (e.g. on sign-out), which unsubscribes from
@@ -385,10 +407,12 @@ Everything is exported from the package root.
 **Stores**
 
 - `SqliteStore` — wraps a `DataSource` and routes all persistence through its `EntityManager`.
-- `CloudStore` — abstract base defining the sync contract and reactive state.
-  `applied$` emits `AppliedRecords` (`{ recordType, count }`) after cloud-origin records are written
-  locally. Those writes run with entity listeners off, so subscribe to it to refresh anything that reads them.
+- `CloudStore` — abstract base defining the sync contract and reactive state (`applied$`,
+  `pending$`, `lastError$`, `downloading$`; see Reactive state). `AppliedRecords` is the `applied$`
+  payload type; `UploadTimeoutError` is what `lastError$` carries after a timed-out upload.
 - `CloudFirebaseFirestore` — Firebase Web SDK implementation of `CloudStore`.
+- `serializeLocalTransaction(manager, work)` — the per-DataSource transaction lock every library
+  write takes; use it around an app transaction that writes directly (see Limitations).
 
 **Multi-tenant**
 
@@ -396,7 +420,7 @@ Everything is exported from the package root.
 
 **Write protocol (client + server)**
 
-- `StoreRecordWriter`, `WriteOptions`
+- `StoreRecordWriter`, `WriteOptions`, `WriteResult` (`{ record, newerCloudCopy? }`)
 - `PathBuilder`, `PathTarget`
 - `FirestorePort`, `WriteTxn`, `DocSnap`, `VersionedRecord`
 - `WebFirestorePort` — Web SDK binding.

@@ -146,7 +146,24 @@ export class CloudFirebaseFirestore extends CloudStore {
   // overlap. subscribeObj resolves once its listener's first delivery lands or the listener fails, so
   // awaiting them together preserves the same "private cloud is up" guarantee the serial loop gave.
   protected async subscribePublicCloud() {
-    await Promise.all(this.publicRecords.map((PublicRecord) => this.subscribeObj(PublicRecord, false)));
+    await this.subscribeInDeclaredOrder(this.publicRecords, false);
+  }
+
+  // Every collection's catch-up is fetched concurrently, but stored in the order the records were
+  // declared: a collection's first page waits for the previous collection's catch-up to finish. A
+  // record that references another collection's rows (a foreign key) is listed after it, so its rows
+  // never arrive before the rows they point at. Listeners open once each catch-up is done.
+  private subscribeInDeclaredOrder(records: (typeof StoreRecord)[], isPrivate: boolean): Promise<void[]> {
+    let storeAfter: Promise<void> = Promise.resolve();
+    return Promise.all(
+      records.map((record) => {
+        let catchUpDone: () => void = () => undefined;
+        const done = new Promise<void>((resolve) => (catchUpDone = resolve));
+        const setup = this.subscribeObj(record, isPrivate, storeAfter, catchUpDone);
+        storeAfter = done;
+        return setup;
+      }),
+    );
   }
 
   protected async subscribePrivateCloud() {
@@ -158,7 +175,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     // the local user (its authId), so it must exist before the others subscribe.
     console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
-    await Promise.all(this.privateRecords.map((PrivateRecord) => this.subscribeObj(PrivateRecord, true)));
+    await this.subscribeInDeclaredOrder(this.privateRecords, true);
     if (!this.disposed) {
       this.privateCloudInitialized = true;
     }
@@ -170,51 +187,68 @@ export class CloudFirebaseFirestore extends CloudStore {
     this.firestoreSubscriptions = {};
   }
 
-  // Done implementing CloudStore, now helper functions:
-  protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    if (this.disposed) {
-      return;
-    }
-    let cursor: number;
+  // Done implementing CloudStore, now helper functions.
+  // `storeAfter` gates the first page's store (the fetch runs before it); `catchUpDone` is called
+  // once the catch-up has ended, however it ended, so the next collection can start storing.
+  protected async subscribeObj(
+    obj: any,
+    isPrivate: boolean = true,
+    storeAfter: Promise<void> = Promise.resolve(),
+    catchUpDone: () => void = () => undefined,
+  ) {
+    let listenerAnchor: number;
+    let collectionPath: string;
+    let collectionRef: ReturnType<typeof collection>;
+    const objInstance = new obj();
+    objInstance.isPrivate = isPrivate;
+    const stream: DeliveryStream = { failed: false };
     try {
-      cursor = await this.readCursor(obj, isPrivate);
-    } catch (error) {
       if (this.disposed) {
         return;
       }
-      throw error;
-    }
-    const objInstance = new obj();
-    objInstance.isPrivate = isPrivate;
-    const collectionPath = this.collectionPath(objInstance);
-    const collectionRef = collection(this.db, collectionPath);
-    console.debug('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, cursor);
-
-    // The live listener starts after the last document the catch-up applied. A catch-up that fails
-    // part way leaves the anchor at the last page it did apply, so the listener streams the rest.
-    let listenerAnchor = cursor;
-    const stream: DeliveryStream = { failed: false };
-    try {
-      // The paged catch-up is bounded, so the indicator is held across it.
-      await this.trackDownload(async () => {
-        const fetchPage = async (afterDocument: QueryDocumentSnapshot | undefined) => {
-          const constraints = [where('changeId', '>', cursor), orderBy('changeId')];
-          const pageQuery = afterDocument
-            ? query(collectionRef, ...constraints, startAfter(afterDocument), limit(CATCH_UP_PAGE_SIZE))
-            : query(collectionRef, ...constraints, limit(CATCH_UP_PAGE_SIZE));
-          return (await getDocs(pageQuery)).docs;
-        };
-        for await (const page of catchUpPages(fetchPage, CATCH_UP_PAGE_SIZE)) {
-          if (this.disposed) {
-            return;
-          }
-          console.debug(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${page.length}`);
-          await this.resolveSnapshot(obj, page, isPrivate, collectionPath, stream);
-          listenerAnchor = page[page.length - 1].data().changeId;
+      let cursor: number;
+      try {
+        cursor = await this.readCursor(obj, isPrivate);
+      } catch (error) {
+        if (this.disposed) {
+          return;
         }
-      });
-    } catch (error) {
-      console.warn('[CloudFirebaseFirestore - subscribeObj] catch-up failed', collectionPath, error);
+        throw error;
+      }
+      collectionPath = this.collectionPath(objInstance);
+      collectionRef = collection(this.db, collectionPath);
+      console.debug('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, cursor);
+
+      // The live listener starts after the last document the catch-up applied. A catch-up that fails
+      // part way leaves the anchor at the last page it did apply, so the listener streams the rest.
+      listenerAnchor = cursor;
+      try {
+        // The paged catch-up is bounded, so the indicator is held across it.
+        await this.trackDownload(async () => {
+          const fetchPage = async (afterDocument: QueryDocumentSnapshot | undefined) => {
+            const constraints = [where('changeId', '>', cursor), orderBy('changeId')];
+            const pageQuery = afterDocument
+              ? query(collectionRef, ...constraints, startAfter(afterDocument), limit(CATCH_UP_PAGE_SIZE))
+              : query(collectionRef, ...constraints, limit(CATCH_UP_PAGE_SIZE));
+            return (await getDocs(pageQuery)).docs;
+          };
+          for await (const page of catchUpPages(fetchPage, CATCH_UP_PAGE_SIZE)) {
+            await storeAfter;
+            if (this.disposed) {
+              return;
+            }
+            console.debug(
+              `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${page.length}`,
+            );
+            await this.resolveSnapshot(obj, page, isPrivate, collectionPath, stream);
+            listenerAnchor = page[page.length - 1].data().changeId;
+          }
+        });
+      } catch (error) {
+        console.warn('[CloudFirebaseFirestore - subscribeObj] catch-up failed', collectionPath, error);
+      }
+    } finally {
+      catchUpDone();
     }
     // Disposed during the catch-up: its subscriptions were already torn down, so a listener opened
     // now would never be.

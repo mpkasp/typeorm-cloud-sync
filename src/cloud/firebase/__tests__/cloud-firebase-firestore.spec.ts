@@ -41,6 +41,14 @@ const snapshotOf = (docs: Record<string, any>[]) => ({
   docChanges: () => docs.map((data) => ({ type: 'added', doc: documentOf(data) })),
 });
 
+const noteDoc = (id: string, changeId: number) => ({
+  id,
+  text: `note ${id}`,
+  changeId,
+  isDeleted: false,
+  isPrivate: false,
+});
+
 const tagDoc = (id: string, changeId: number) => ({
   id,
   label: `tag ${id}`,
@@ -84,6 +92,36 @@ afterEach(async () => {
   await cloud.whenIdle();
   cloud.dispose();
   await dataSource.destroy();
+});
+
+describe('catch-up order', () => {
+  // Fetches overlap, but a collection's pages are stored only after the collections declared before
+  // it have finished their catch-up, so a row never lands before the row it references.
+  test('stores collections in the order they were declared, whatever order their pages arrive', async () => {
+    let releaseTagPage: () => void = () => undefined;
+    const tagPage = new Promise<any>((resolve) => (releaseTagPage = () => resolve(snapshotOf([tagDoc('t1', 1)]))));
+    (getDocs as jest.Mock).mockImplementation((ref: any) =>
+      ref.path === 'Tag' ? tagPage : Promise.resolve(snapshotOf([noteDoc('n1', 1)])),
+    );
+    const ordered = new CloudFirebaseFirestore(User, [Tag, Note], [], new BehaviorSubject<boolean>(true));
+    const stored: string[] = [];
+    const applyDelivery = (ordered as any).applyDelivery.bind(ordered);
+    jest.spyOn(ordered as any, 'applyDelivery').mockImplementation((recordType: any, ...rest: any[]) => {
+      stored.push(recordType.name);
+      return applyDelivery(recordType, ...rest);
+    });
+
+    const setup = ordered.initialize(new SqliteStore(dataSource, User), {} as any);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(stored).toEqual([]);
+
+    releaseTagPage();
+    await setup;
+
+    expect(stored).toEqual(['Tag', 'Note']);
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(1);
+    ordered.dispose();
+  });
 });
 
 describe('subscribeObj live deliveries', () => {
@@ -165,9 +203,9 @@ describe('subscribeObj live deliveries', () => {
     await expect(cloud.readCursor(Tag, false)).resolves.toBe(8);
   });
 
-  // A listener never re-sends a document, so moving the cursor past a failed delivery would skip it
-  // for good. The later delivery still lands; the failed documents are caught up on the next subscribe.
-  test('a failed delivery keeps later deliveries from moving the cursor past it', async () => {
+  // A listener never re-sends a document, so a failed delivery is retried once a later one succeeds,
+  // and the cursor moves past it only then.
+  test('a failed delivery is stored after the next one succeeds, and the cursor follows', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const resolveRecordsLocked = (cloud as any).resolveRecordsLocked.bind(cloud);
     jest
@@ -179,8 +217,19 @@ describe('subscribeObj live deliveries', () => {
     listeners[0](snapshotOf([tagDoc('tag-2', 8)]));
     await waitFor(() => !cloud.downloading);
 
-    expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })).toBeNull();
+    expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })).not.toBeNull();
     expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-2' })).not.toBeNull();
+    await expect(cloud.readCursor(Tag, false)).resolves.toBe(8);
+  });
+
+  test('a failed delivery that no later delivery rescues leaves the cursor where it was', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(cloud as any, 'resolveRecordsLocked').mockRejectedValue(new Error('database is locked'));
+
+    listeners[0](snapshotOf([tagDoc('tag-1', 7)]));
+    await waitFor(() => !cloud.downloading);
+
+    expect(await dataSource.getRepository(Tag).count()).toBe(0);
     await expect(cloud.readCursor(Tag, false)).resolves.toBe(0);
   });
 

@@ -52,11 +52,11 @@ describe('resolve with no local record', () => {
     await expect(changeLogs(dataSource).count()).resolves.toBe(0);
   });
 
-  test('returns null instead of throwing when the insert fails', async () => {
-    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  // The caller advances the download cursor only when a store succeeds, so a failure has to reach it.
+  test('throws when the insert fails', async () => {
     jest.spyOn(sqliteStore, 'saveRecord').mockRejectedValue(new Error('db is gone'));
 
-    await expect(sqliteStore.resolve(cloudNote({ id: 'cloud-1' }))).resolves.toBeNull();
+    await expect(sqliteStore.resolve(cloudNote({ id: 'cloud-1' }))).rejects.toThrow('db is gone');
   });
 });
 

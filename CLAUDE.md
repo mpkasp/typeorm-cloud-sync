@@ -14,16 +14,26 @@ not visible to the app until it is pushed and re-pinned with `daily/scripts/upda
 ## Layout
 
 - `src/models/` — `StoreRecord` (base entity), `BaseUser`, `StoreChangeLog` (the upload outbox), `Meta` (the download cursor).
+- `src/migrations/` — exported migrations for consumers that run migrations rather than `synchronize`.
+- `src/local-transaction-lock.ts` — `serializeLocalTransaction`, the per-DataSource lock every write takes.
 - `src/sqlite-store.ts` — the local side; `resolve()` is conflict resolution.
 - `src/cloud/cloud-store.ts` — abstract orchestration: drain (`updateCloudFromChangeLog`), download
   apply (`resolveRecords`), downloading refcount, subscribers, disposal.
-- `src/cloud/firebase/cloud-firebase-firestore.ts` — Firestore adapter: paged catch-up + live
-  listeners (`subscribeObj`), user document listener.
+- `src/cloud/firebase/cloud-firebase-firestore.ts` — Firestore adapter: paged catch-up
+  (`catch-up-pages.ts`) + live listeners (`subscribeObj`), user document listener.
 - `src/cloud/firebase/protocol/` — SDK-agnostic versioned write protocol (`StoreRecordWriter`,
   `PathBuilder`, `FirestorePort`), shared with the app's Cloud Functions.
 - `src/tenant.ts` — one account's isolated stack + registry.
 - `src/__tests__/` — `fake-cloud-store.ts` and `fake-firestore-port.ts` let the orchestration run
-  without Firebase. `sync-invariants.spec.ts` holds expected-failing tests for known defects.
+  without Firebase. `sync-invariants.spec.ts` holds one test per invariant below; a newly found
+  defect goes there as `test.failing` until fixed.
+
+## Docs to keep in step
+
+`../daily/docs/sync-architecture.md` describes how the app uses this library end to end (write path,
+read path, accounts, sign-in/out, rules, Cloud Function, outbox). A change here that alters behaviour
+the app can observe — a trigger, an observable, a conflict rule, a path in Firestore — updates that
+document in the same piece of work, along with the README section it affects.
 
 ## Invariants
 
@@ -47,6 +57,9 @@ Every change must preserve these. When a change touches one, add or update a tes
 9. **After a skipped upload, local equals cloud.** When the writer skips a record because the cloud copy is
    newer, the drain stores that copy locally in the write-back transaction (listeners off, no change log).
    The download cannot be relied on: the device may already be past that copy's `changeId`.
+10. **The cursor never passes a record the device does not hold.** A store that fails is thrown, not
+    swallowed; the delivery is retried after the next one that succeeds; collections are stored in the
+    declared order so a referenced row lands first.
 
 ## Working rules
 

@@ -520,6 +520,85 @@ describe('download cursor', () => {
   });
 });
 
+// A row can be refused because a row it references sits in a collection whose delivery has not
+// landed yet (a foreign key), so a failed delivery waits for the next successful one and tries again.
+describe('a delivery that cannot be stored', () => {
+  beforeEach(async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await waitFor(async () => (await changeLogCount()) === 0);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  const cloudNote = (id: string, changeId: number) =>
+    new Note({ id, text: id, changeId, createdMs: 1000, updatedMs: 1000 });
+
+  test('leaves the cursor alone, then is stored and moves it after the next delivery succeeds', async () => {
+    jest.spyOn(dataSource.manager, 'save').mockRejectedValueOnce(new Error('FOREIGN KEY constraint failed'));
+    const applied: number[] = [];
+    cloud.applied$.subscribe((event) => applied.push(event.count));
+
+    await expect((cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)])).rejects.toThrow('FOREIGN KEY');
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(0);
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(0);
+
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('b', 2)]);
+
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(2);
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(2);
+    expect(applied).toEqual([1, 1]);
+  });
+
+  test('keeps its own listener from moving the cursor until it is stored', async () => {
+    jest.spyOn(dataSource.manager, 'save').mockRejectedValueOnce(new Error('FOREIGN KEY constraint failed'));
+    const stream = { failed: false };
+
+    await expect((cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)], stream)).rejects.toThrow();
+    // A later delivery on the same listener stores but must not move the cursor past 'a'.
+    jest.spyOn(dataSource.manager, 'save').mockRejectedValueOnce(new Error('FOREIGN KEY constraint failed'));
+    await expect((cloud as any).applyDelivery(Note, true, [cloudNote('c', 3)], stream)).rejects.toThrow();
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(0);
+
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('b', 2)]);
+
+    await expect(dataSource.getRepository(Note).count()).resolves.toBe(3);
+    expect(stream.failed).toBe(false);
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(3);
+  });
+
+  test('on the conflict path does not move the cursor either', async () => {
+    // Offline for the whole test: a drain would upload the local note and rewrite its changeId.
+    network.next(false);
+    const local = await new Note({ id: 'a', text: 'mine', changeId: 1, createdMs: 1000, updatedMs: 1000 }).save(
+      { listeners: false },
+      false,
+    );
+    await local.updateChangeLog();
+    // A database with no cursor row starts from its highest local changeId; that is the row the
+    // failed delivery must leave alone.
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(1);
+    jest.spyOn(sqliteStore, 'saveRecord').mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(
+      (cloud as any).applyDelivery(Note, true, [
+        new Note({ id: 'a', text: 'theirs', changeId: 2, createdMs: 1000, updatedMs: 2000 }),
+      ]),
+    ).rejects.toThrow('disk full');
+
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(1);
+    await expect(changeLogCount()).resolves.toBe(1);
+  });
+
+  test('is forgotten on dispose', async () => {
+    jest.spyOn(dataSource.manager, 'save').mockRejectedValueOnce(new Error('FOREIGN KEY constraint failed'));
+    await expect((cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)])).rejects.toThrow();
+
+    cloud.dispose();
+
+    expect((cloud as any).failedDeliveries).toEqual([]);
+  });
+});
+
 describe('applied$', () => {
   beforeEach(async () => {
     await seedUser();

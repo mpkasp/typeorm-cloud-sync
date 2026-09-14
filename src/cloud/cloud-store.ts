@@ -61,9 +61,20 @@ export function browserNetwork$(): Observable<boolean> {
   );
 }
 
-// One listener's deliveries. `failed` is set by the first delivery that could not be applied.
+// One listener's deliveries. `failed` is set while any delivery on it could not be stored and has
+// not been stored since by a retry; `unapplied` counts those deliveries, and `highestStored` is the
+// highest changeId stored on the stream so far, which is where the cursor goes once none remain.
 export interface DeliveryStream {
   failed: boolean;
+  unapplied?: number;
+  highestStored?: number;
+}
+
+interface FailedDelivery {
+  recordType: typeof StoreRecord;
+  isPrivate: boolean;
+  records: StoreRecord[];
+  stream: DeliveryStream;
 }
 
 export class UploadTimeoutError extends Error {
@@ -132,6 +143,11 @@ export abstract class CloudStore {
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
+  // Deliveries that could not be stored, retried after the next delivery that could. A row can be
+  // refused because a row it references (a foreign key) sits in another collection whose delivery
+  // has not landed yet; that delivery is what makes the retry worth attempting.
+  private failedDeliveries: FailedDelivery[] = [];
+  private retryingFailedDeliveries: boolean = false;
   // An upload that has not settled by then is abandoned for this drain; its change-log row stays queued.
   protected uploadTimeoutMs: number = 15_000;
 
@@ -259,6 +275,7 @@ export abstract class CloudStore {
     this.detachSubscribers();
     this.unsubscribePrivateCloud();
     this.subscriptions.unsubscribe();
+    this.failedDeliveries = [];
     this.appliedSubject.complete();
     this.pendingSubject.complete();
     this.lastErrorSubject.complete();
@@ -588,10 +605,11 @@ export abstract class CloudStore {
 
   // Apply one cloud delivery (a catch-up page or a live snapshot), then advance the cursor to the
   // highest changeId it carried. The cursor moves only after the records are stored, and only here.
-  // A listener hands each document over once, so once a delivery on `stream` fails, later deliveries
-  // still apply but no longer move the cursor: the failed documents stay above it and the next
-  // subscribe catches them up. Both steps share one lock hold, and the lock runs deliveries in arrival
-  // order, so a failure is recorded before any later delivery reads it.
+  // A listener hands each document over once, so while a delivery on `stream` is unapplied, later
+  // deliveries still apply but no longer move the cursor: the failed documents stay above it, and a
+  // successful retry or the next subscribe brings them in. Both steps share one lock hold, and the
+  // lock runs deliveries in arrival order, so a failure is recorded before any later delivery reads it.
+  // A delivery that succeeds retries the ones that failed before it.
   protected async applyDelivery(
     recordType: typeof StoreRecord,
     isPrivate: boolean,
@@ -601,27 +619,82 @@ export abstract class CloudStore {
     if (records.length === 0) {
       return;
     }
-    const appliedCount = await serializeLocalTransaction(this.manager, async () => {
-      if (this.disposed) {
-        return 0;
-      }
-      let resolvedRecords: StoreRecord[];
-      try {
-        resolvedRecords = await this.resolveRecordsLocked(recordType, records);
-      } catch (error) {
+    const appliedCount = await this.storeDelivery({ recordType, isPrivate, records, stream }, false);
+    this.announceApplied(recordType, appliedCount);
+    await this.retryFailedDeliveries();
+  }
+
+  private async storeDelivery(delivery: FailedDelivery, isRetry: boolean): Promise<number> {
+    const { recordType, isPrivate, records, stream } = delivery;
+    try {
+      return await serializeLocalTransaction(this.manager, async () => {
+        if (this.disposed) {
+          return 0;
+        }
+        const resolvedRecords = await this.resolveRecordsLocked(recordType, records);
+        stream.highestStored = Math.max(stream.highestStored ?? 0, ...records.map((record) => record.changeId));
+        if (isRetry) {
+          stream.unapplied = (stream.unapplied ?? 1) - 1;
+          stream.failed = stream.unapplied > 0;
+        }
+        if (!stream.failed) {
+          await this.advanceCursorLocked(recordType, isPrivate, stream.highestStored);
+        }
+        return resolvedRecords.length;
+      });
+    } catch (error) {
+      if (!isRetry) {
         stream.failed = true;
-        throw error;
+        stream.unapplied = (stream.unapplied ?? 0) + 1;
       }
-      if (!stream.failed) {
-        await this.advanceCursorLocked(recordType, isPrivate, Math.max(...records.map((record) => record.changeId)));
+      if (!this.disposed) {
+        this.failedDeliveries.push(delivery);
       }
-      return resolvedRecords.length;
-    });
-    // Every upload echoes back as a delivery that changes nothing; announcing those would make the app
-    // refresh after each of its own edits.
+      throw error;
+    }
+  }
+
+  // Every upload echoes back as a delivery that changes nothing; announcing those would make the app
+  // refresh after each of its own edits.
+  private announceApplied(recordType: typeof StoreRecord, appliedCount: number) {
     if (appliedCount > 0 && !this.disposed) {
       this.appliedSubject.next({ recordType, count: appliedCount });
       this.refreshPendingInBackground();
+    }
+  }
+
+  // Each pass retries every failed delivery once; a delivery that fails again is queued for the pass
+  // after the next success. A pass that stored something runs again, since it may have supplied the
+  // rows another failed delivery was waiting for.
+  private async retryFailedDeliveries(): Promise<void> {
+    if (this.retryingFailedDeliveries) {
+      return;
+    }
+    this.retryingFailedDeliveries = true;
+    try {
+      let storedSomething = true;
+      while (storedSomething && this.failedDeliveries.length > 0 && !this.disposed) {
+        storedSomething = false;
+        const attempts = this.failedDeliveries;
+        this.failedDeliveries = [];
+        for (const attempt of attempts) {
+          if (this.disposed) {
+            return;
+          }
+          try {
+            this.announceApplied(attempt.recordType, await this.storeDelivery(attempt, true));
+            storedSomething = true;
+          } catch (error) {
+            console.warn(
+              '[CloudStore] retried delivery still cannot be stored',
+              storeNameOf(attempt.recordType),
+              error,
+            );
+          }
+        }
+      }
+    } finally {
+      this.retryingFailedDeliveries = false;
     }
   }
 
