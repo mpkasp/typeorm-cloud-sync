@@ -1,5 +1,5 @@
 // tslint:disable: no-console
-import { CloudStore } from '../cloud-store';
+import { CloudStore, DeliveryStream } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
@@ -9,6 +9,7 @@ import { StoreRecordWriter } from './protocol/store-record-writer';
 import { VersionedRecord } from './protocol/firestore-port';
 import { WebFirestorePort } from './web-firestore-port';
 import { serializeLocalTransaction } from '../../local-transaction-lock';
+import { catchUpPages } from './catch-up-pages';
 
 import { Observable } from 'rxjs';
 import { FirebaseApp, initializeApp } from 'firebase/app';
@@ -27,8 +28,11 @@ import {
   limit,
   orderBy,
   startAfter,
+  QueryDocumentSnapshot,
   Unsubscribe,
 } from 'firebase/firestore';
+
+const CATCH_UP_PAGE_SIZE = 500;
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
@@ -138,8 +142,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   // so their catch-up round trips can run concurrently rather than one after another — the difference
   // between one network latency and the sum of them on launch. The database writes they produce are
   // still serialized (CloudStore.resolveRecords funnels them through one queue), so only the fetches
-  // overlap. subscribeObj resolves once its listener's first delivery lands, so awaiting them together
-  // preserves the same "private cloud is up" guarantee the serial loop gave.
+  // overlap. subscribeObj resolves once its listener's first delivery lands or the listener fails, so
+  // awaiting them together preserves the same "private cloud is up" guarantee the serial loop gave.
   protected async subscribePublicCloud() {
     await Promise.all(this.publicRecords.map((PublicRecord) => this.subscribeObj(PublicRecord, false)));
   }
@@ -165,116 +169,91 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
-    const queryLimit = 500;
-    const latestChangeId = await this.readCursor(obj, isPrivate);
+    const cursor = await this.readCursor(obj, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
-    console.debug('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, latestChangeId);
-    return new Promise<void>(async (resolve) => {
-      let unresolved = true;
-      const collectionRef = collection(this.db, collectionPath);
+    const collectionRef = collection(this.db, collectionPath);
+    console.debug('[CloudFirebaseFirestore - subscribeObj]', collectionPath, isPrivate, cursor);
 
-      let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy('changeId'), limit(queryLimit));
-      // The paged catch-up is bounded, so the indicator can be held across it. The wait for the first
-      // onSnapshot callback below deliberately is not counted: that handshake has no error callback and
-      // can stay pending, and a refcount held on it would pin the indicator on and block every later
-      // cloud push.
+    // The live listener starts after the last document the catch-up applied. A catch-up that fails
+    // part way leaves the anchor at the last page it did apply, so the listener streams the rest.
+    let listenerAnchor = cursor;
+    const stream: DeliveryStream = { failed: false };
+    try {
+      // The paged catch-up is bounded, so the indicator is held across it.
       await this.trackDownload(async () => {
-        let documentSnapshots = await getDocs(q);
-        while (true) {
-          // Fetch the next page before writing this one, so the Firestore round trip overlaps the
-          // local write instead of running after it. Pages are still applied strictly in order —
-          // only one resolveSnapshot runs at a time — so conflict resolution is unchanged.
-          // startAfter(lastVisible) is a stable changeId cursor, so the documents fetched are exactly
-          // those a serial paged read would return; the original per-page changeId recompute was a
-          // redundant floor (startAfter already excludes everything written) and is dropped so the
-          // prefetch need not wait on the write to finish.
-          const morePages = documentSnapshots.size === queryLimit;
-          const nextQuery = morePages
-            ? query(
-                collectionRef,
-                where('changeId', '>', latestChangeId),
-                orderBy('changeId'),
-                startAfter(documentSnapshots.docs[documentSnapshots.docs.length - 1]),
-                limit(queryLimit),
-              )
-            : null;
-          const nextSnapshots = nextQuery ? getDocs(nextQuery) : null;
-          // If resolveSnapshot below throws, the loop exits without ever awaiting nextSnapshots. A
-          // rejection on that abandoned promise would otherwise be unhandled — the .catch here just
-          // marks it observed; the real value/error is still delivered to "await nextSnapshots!" when
-          // the loop continues normally.
-          nextSnapshots?.catch(() => undefined);
-
-          console.debug(
-            `[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${documentSnapshots.size}, changeId: ${latestChangeId}`,
-          );
-          await this.resolveSnapshot(obj, documentSnapshots, latestChangeId, isPrivate, collectionPath);
-
-          if (!nextQuery) {
-            break;
-          }
-          // Keep q pointing at the query that fetched the page we just applied, so the live
-          // onSnapshot below subscribes from the same cursor the serial version ended on.
-          q = nextQuery;
-          documentSnapshots = await nextSnapshots!;
+        const fetchPage = async (afterDocument: QueryDocumentSnapshot | undefined) => {
+          const constraints = [where('changeId', '>', cursor), orderBy('changeId')];
+          const pageQuery = afterDocument
+            ? query(collectionRef, ...constraints, startAfter(afterDocument), limit(CATCH_UP_PAGE_SIZE))
+            : query(collectionRef, ...constraints, limit(CATCH_UP_PAGE_SIZE));
+          return (await getDocs(pageQuery)).docs;
+        };
+        for await (const page of catchUpPages(fetchPage, CATCH_UP_PAGE_SIZE)) {
+          console.debug(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${page.length}`);
+          await this.resolveSnapshot(obj, page, isPrivate, collectionPath, stream);
+          listenerAnchor = page[page.length - 1].data().changeId;
         }
       });
+    } catch (error) {
+      console.warn('[CloudFirebaseFirestore - subscribeObj] catch-up failed', collectionPath, error);
+    }
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        // Everything that arrives after setup — including the backlog Firestore streams on reconnect —
-        // lands here. Counting it is what keeps the indicator up while that data is still being written.
-        // Each delivery reads its own changeId: two callbacks can overlap, and sharing the outer
-        // latestChangeId would let one clobber the other's cursor.
-        void this.trackDownload(async () => {
-          // Serialized like the setup read above.
-          const changeId = await serializeLocalTransaction(this.manager, () =>
-            StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
-          );
-          await this.resolveSnapshot(obj, snapshot, changeId, isPrivate, collectionPath);
-        })
-          .catch((e) =>
-            console.warn('[CloudFirebaseFirestore - subscribeObj] failed applying snapshot', collectionPath, e),
-          )
-          .finally(() => {
-            // Settles the setup promise even when the first delivery failed; a throw here used to
-            // leave initialize() awaiting forever.
-            if (unresolved) {
-              console.debug('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
-              resolve();
-              unresolved = false;
-            }
-          });
-      });
+    return new Promise<void>((resolve) => {
+      let unresolved = true;
+      const settle = () => {
+        if (unresolved) {
+          unresolved = false;
+          console.debug('[CloudFirebaseFirestore - subscribeObj] resolved', collectionPath);
+          resolve();
+        }
+      };
+
+      // No limit: a limited listener would only ever see the first page above the anchor. Firestore
+      // hands the callback the whole result set, so each delivery applies only its docChanges.
+      const liveQuery = query(collectionRef, where('changeId', '>', listenerAnchor), orderBy('changeId'));
+      const unsubscribe = onSnapshot(
+        liveQuery,
+        (snapshot) => {
+          const changedDocuments = snapshot
+            .docChanges()
+            .filter((change) => change.type === 'added' || change.type === 'modified')
+            .map((change) => change.doc);
+          if (changedDocuments.length === 0) {
+            settle();
+            return;
+          }
+          // Everything that arrives after setup — including the backlog Firestore streams on
+          // reconnect — lands here. Counting it keeps the indicator up while that data is written.
+          void this.trackDownload(() => this.resolveSnapshot(obj, changedDocuments, isPrivate, collectionPath, stream))
+            .catch((error) =>
+              console.warn('[CloudFirebaseFirestore - subscribeObj] failed applying snapshot', collectionPath, error),
+            )
+            .finally(settle);
+        },
+        (error) => {
+          console.warn('[CloudFirebaseFirestore - subscribeObj] subscription failed', collectionPath, error);
+          settle();
+        },
+      );
 
       this.firestoreSubscriptions[storeNameOf(objInstance)] = { record: obj, unsubscribe };
     });
   }
 
-  // TODO: Correct types here
   private async resolveSnapshot(
     obj: any,
-    snapshot: any,
-    latestChangeId: number,
+    documents: QueryDocumentSnapshot[],
     isPrivate: boolean,
     collectionPath: string,
+    stream: DeliveryStream,
   ) {
-    const records: StoreRecord[] = [];
-    snapshot.docs.forEach((docRef: any) => {
-      const d = docRef.data();
-      // if (d.changeId > latestChangeId) {
-      records.push(new obj(this.deserialize(d, docRef.id, isPrivate)));
-      // }
-    });
-    console.debug(
-      `[subscribeObj] Received object: ${collectionPath} ${records.length}; latest changeId: ${latestChangeId}, isPrivate: ${isPrivate}`,
-      records[0],
-      records[1],
-      records,
+    const records: StoreRecord[] = documents.map(
+      (document) => new obj(this.deserialize(document.data(), document.id, isPrivate)),
     );
-    await this.applyDelivery(obj, isPrivate, records);
+    console.debug(`[subscribeObj] Received object: ${collectionPath} ${records.length}, isPrivate: ${isPrivate}`);
+    await this.applyDelivery(obj, isPrivate, records, stream);
   }
 
   private collectionPath(obj: StoreRecord): string {

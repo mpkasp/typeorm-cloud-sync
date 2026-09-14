@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { getDocs, onSnapshot, where } from 'firebase/firestore';
+import { getDocs, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { SqliteStore } from '../../../sqlite-store';
 import { StoreChangeLog } from '../../../models/store-change-log.model';
 import { Meta } from '../../../models/meta.model';
@@ -32,9 +32,13 @@ let cloud: CloudFirebaseFirestore;
 // Every live listener subscribeObj attached, in subscription order.
 let listeners: ((snapshot: any) => void)[];
 
+const documentOf = (data: Record<string, any>) => ({ id: data.id, data: () => ({ ...data }) });
+
+// A delivery whose documents are all new to the listener, as Firestore reports them.
 const snapshotOf = (docs: Record<string, any>[]) => ({
   size: docs.length,
-  docs: docs.map((data) => ({ id: data.id, data: () => ({ ...data }) })),
+  docs: docs.map(documentOf),
+  docChanges: () => docs.map((data) => ({ type: 'added', doc: documentOf(data) })),
 });
 
 const tagDoc = (id: string, changeId: number) => ({
@@ -137,11 +141,47 @@ describe('subscribeObj live deliveries', () => {
     expect(stored.updatedMs).toEqual(expect.any(Number));
   });
 
+  test('applies only the documents a delivery changed', async () => {
+    listeners[0]({
+      docChanges: () => [
+        { type: 'modified', doc: documentOf(tagDoc('tag-1', 9)) },
+        { type: 'removed', doc: documentOf(tagDoc('tag-2', 8)) },
+      ],
+    });
+    await waitFor(() => !cloud.downloading);
+
+    expect((await dataSource.getRepository(Tag).find()).map((tag) => tag.id)).toEqual(['tag-1']);
+  });
+
+  test('a delivery with no changes leaves the indicator down', () => {
+    listeners[0]({ docChanges: () => [] });
+    expect(cloud.downloading).toBe(false);
+  });
+
   test('advances the collection cursor to the highest changeId a delivery carried', async () => {
     listeners[0](snapshotOf([tagDoc('tag-1', 8), tagDoc('tag-2', 7)]));
     await waitFor(() => !cloud.downloading);
 
     await expect(cloud.readCursor(Tag, false)).resolves.toBe(8);
+  });
+
+  // A listener never re-sends a document, so moving the cursor past a failed delivery would skip it
+  // for good. The later delivery still lands; the failed documents are caught up on the next subscribe.
+  test('a failed delivery keeps later deliveries from moving the cursor past it', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const resolveRecordsLocked = (cloud as any).resolveRecordsLocked.bind(cloud);
+    jest
+      .spyOn(cloud as any, 'resolveRecordsLocked')
+      .mockRejectedValueOnce(new Error('database is locked'))
+      .mockImplementation((...args: any[]) => resolveRecordsLocked(...args));
+
+    listeners[0](snapshotOf([tagDoc('tag-1', 7)]));
+    listeners[0](snapshotOf([tagDoc('tag-2', 8)]));
+    await waitFor(() => !cloud.downloading);
+
+    expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })).toBeNull();
+    expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-2' })).not.toBeNull();
+    await expect(cloud.readCursor(Tag, false)).resolves.toBe(0);
   });
 
   // A delivery that throws must not pin the indicator on: `downloading` gates updateCloudFromChangeLog,
@@ -174,6 +214,42 @@ test('subscribeObj catches up from the stored cursor, not from the highest local
     expect(where).toHaveBeenCalledWith('changeId', '>', 3);
   } finally {
     cursorCloud.dispose();
+    await ds.destroy();
+  }
+});
+
+test('setup settles when the listener fails', async () => {
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  (onSnapshot as jest.Mock).mockImplementation((_query: any, _onNext: any, onError: (error: unknown) => void) => {
+    onError(new Error('permission-denied'));
+    return () => undefined;
+  });
+  const failingCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+
+  try {
+    await failingCloud.initialize(new SqliteStore(ds, User), {} as any);
+    expect(failingCloud.downloading).toBe(false);
+  } finally {
+    failingCloud.dispose();
+    await ds.destroy();
+  }
+});
+
+test('setup settles and still listens when the catch-up fails', async () => {
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  (getDocs as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
+  (where as jest.Mock).mockClear();
+  const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  const offlineCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+
+  try {
+    await offlineCloud.initialize(new SqliteStore(ds, User), {} as any);
+    expect(offlineCloud.downloading).toBe(false);
+    expect(onSnapshot).toHaveBeenCalled();
+    expect(where).toHaveBeenLastCalledWith('changeId', '>', 0);
+  } finally {
+    offlineCloud.dispose();
     await ds.destroy();
   }
 });
@@ -219,6 +295,48 @@ describe('subscribeObj paged catch-up', () => {
       // read (fetch, then write, then fetch) would record 1 here.
       expect(getDocsCallsAtWrite[0]).toBe(2);
       await expect(pagedCloud.readCursor(Tag, false)).resolves.toBe(503);
+    } finally {
+      pagedCloud.dispose();
+      await ds.destroy();
+    }
+  });
+
+  test('anchors the live listener, without a limit, after the last caught-up document', async () => {
+    const fullPage = Array.from({ length: QUERY_LIMIT }, (_, i) => tagDoc(`t${i}`, i + 1));
+    (query as jest.Mock).mockClear();
+    (where as jest.Mock).mockClear();
+    (limit as jest.Mock).mockClear();
+    (onSnapshot as jest.Mock).mockClear();
+
+    const { ds, pagedCloud } = await runPagedDownload([fullPage, [tagDoc('t500', 501)]]);
+
+    try {
+      expect(await ds.getRepository(Tag).count()).toBe(501);
+      const queryCalls = (query as jest.Mock).mock.calls;
+      // The live query is the last one built: the collection, a where and an orderBy — no limit, no startAfter.
+      expect(queryCalls[queryCalls.length - 1]).toHaveLength(3);
+      expect(onSnapshot).toHaveBeenCalledTimes(1);
+      expect(where).toHaveBeenLastCalledWith('changeId', '>', 501);
+      expect(limit).toHaveBeenCalledTimes(2);
+    } finally {
+      pagedCloud.dispose();
+      await ds.destroy();
+    }
+  });
+
+  test('a catch-up that fails part way anchors the listener after the last page it applied', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fullPage = Array.from({ length: QUERY_LIMIT }, (_, i) => tagDoc(`t${i}`, i + 1));
+    (getDocs as jest.Mock).mockClear();
+    (getDocs as jest.Mock).mockResolvedValueOnce(snapshotOf(fullPage)).mockRejectedValueOnce(new Error('unavailable'));
+    (where as jest.Mock).mockClear();
+    const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+    const pagedCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+
+    try {
+      await pagedCloud.initialize(new SqliteStore(ds, User), {} as any);
+      expect(await ds.getRepository(Tag).count()).toBe(QUERY_LIMIT);
+      expect(where).toHaveBeenLastCalledWith('changeId', '>', QUERY_LIMIT);
     } finally {
       pagedCloud.dispose();
       await ds.destroy();

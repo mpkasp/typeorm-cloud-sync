@@ -61,6 +61,11 @@ export function browserNetwork$(): Observable<boolean> {
   );
 }
 
+// One listener's deliveries. `failed` is set by the first delivery that could not be applied.
+export interface DeliveryStream {
+  failed: boolean;
+}
+
 export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(isOnline());
   public network$: Observable<boolean> = this.networkSubject.asObservable();
@@ -419,24 +424,44 @@ export abstract class CloudStore {
 
   // Moves the cursor forward to `changeId`, never back: deliveries can apply out of order.
   public advanceCursor(recordType: typeof StoreRecord, isPrivate: boolean, changeId: number): Promise<void> {
-    return serializeLocalTransaction(this.manager, async () => {
-      const collection = storeNameOf(recordType);
-      const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
-      if (meta && meta.changeId >= changeId) {
-        return;
-      }
-      await this.manager.getRepository(Meta).save(new Meta(collection, isPrivate, changeId), { listeners: false });
-    });
+    return serializeLocalTransaction(this.manager, () => this.advanceCursorLocked(recordType, isPrivate, changeId));
+  }
+
+  private async advanceCursorLocked(recordType: typeof StoreRecord, isPrivate: boolean, changeId: number) {
+    const collection = storeNameOf(recordType);
+    const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
+    if (meta && meta.changeId >= changeId) {
+      return;
+    }
+    await this.manager.getRepository(Meta).save(new Meta(collection, isPrivate, changeId), { listeners: false });
   }
 
   // Apply one cloud delivery (a catch-up page or a live snapshot), then advance the cursor to the
   // highest changeId it carried. The cursor moves only after the records are stored, and only here.
-  protected async applyDelivery(recordType: typeof StoreRecord, isPrivate: boolean, records: StoreRecord[]) {
+  // A listener hands each document over once, so once a delivery on `stream` fails, later deliveries
+  // still apply but no longer move the cursor: the failed documents stay above it and the next
+  // subscribe catches them up. Both steps share one lock hold, and the lock runs deliveries in arrival
+  // order, so a failure is recorded before any later delivery reads it.
+  protected async applyDelivery(
+    recordType: typeof StoreRecord,
+    isPrivate: boolean,
+    records: StoreRecord[],
+    stream: DeliveryStream = { failed: false },
+  ) {
     if (records.length === 0) {
       return;
     }
-    await this.resolveRecords(recordType, records);
-    await this.advanceCursor(recordType, isPrivate, Math.max(...records.map((record) => record.changeId)));
+    await serializeLocalTransaction(this.manager, async () => {
+      try {
+        await this.resolveRecordsLocked(recordType, records);
+      } catch (error) {
+        stream.failed = true;
+        throw error;
+      }
+      if (!stream.failed) {
+        await this.advanceCursorLocked(recordType, isPrivate, Math.max(...records.map((record) => record.changeId)));
+      }
+    });
   }
 
   // Apply a page of records from the cloud. Records with a pending local change go through the
@@ -452,8 +477,8 @@ export abstract class CloudStore {
   }
 
   private async resolveRecordsLocked(recordType: typeof StoreRecord, objs: StoreRecord[]) {
-    // Drop anything the local row already has: a re-delivered document (Firestore replays the
-    // backlog on reconnect) or a stale page. Comparing against the current changeId rather than
+    // Drop anything the local row already has: a re-delivered document (a listener reopened
+    // over records already stored) or a stale page. Comparing against the current changeId rather than
     // relying on the cloud to only ever send new data keeps re-delivery a true no-op.
     const localChangeIds = await this.localChangeIds(recordType, objs);
     const incoming = objs.filter((obj) => {
