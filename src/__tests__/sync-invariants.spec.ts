@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 
 // I1 — a change-log row is deleted only by the drain that observed that exact version of it. (F2)
-test.failing('a local edit made while its record is mid-upload is not dropped from the change log', async () => {
+test('a local edit made while its record is mid-upload is not dropped from the change log', async () => {
   const note = await stageOffline(() => new Note({ text: 'v1' }).saveWithManager(dataSource.manager));
   await expect(changeLogCount()).resolves.toBe(1);
 
@@ -126,4 +126,64 @@ test.failing('coming back online drains the change log', async () => {
   await waitFor(async () => (await changeLogCount()) === 0, 1000).catch(() => undefined);
 
   await expect(changeLogCount()).resolves.toBe(0);
+});
+
+// I1 — the download conflict path deletes change-log rows without checking their version, so a local
+// edit that lands while a newer cloud copy is being applied loses its queued row. (found in T3)
+test.failing('a local edit made while a newer cloud copy is being applied stays queued', async () => {
+  const note = await stageOffline(() => new Note({ text: 'local v1' }).saveWithManager(dataSource.manager));
+  const cloudCopy = new Note({ id: note.id, text: 'cloud', changeId: 7 });
+  (cloudCopy as any).createdMs = (note as any).createdMs;
+  (cloudCopy as any).updatedMs = (note as any).updatedMs + 1000;
+
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const saveRecord = sqliteStore.saveRecord.bind(sqliteStore);
+  jest.spyOn(sqliteStore, 'saveRecord').mockImplementation(async (record, updateChangeLog) => {
+    const saved = await saveRecord(record, updateChangeLog);
+    await gate;
+    return saved;
+  });
+
+  const apply = (cloud as any).resolveRecords(Note, [cloudCopy]);
+  await sleep(20);
+  await stageOffline(async () => {
+    const edited = (await dataSource.getRepository(Note).findOneBy({ id: note.id }))!;
+    edited.text = 'local v2';
+    await edited.saveWithManager(dataSource.manager);
+  });
+  release();
+  await apply;
+
+  await expect(changeLogCount()).resolves.toBe(1);
+});
+
+// I1/I7 — sqljs and Capacitor share one query runner, so an overlapping transaction nests as a
+// SAVEPOINT inside whichever transaction is open. When the outer one rolls back, it undoes a save that
+// already resolved to its caller. (found in T3)
+test.failing('a failed overlapping transaction does not undo a save that already resolved', async () => {
+  const note = new Note({ text: 'user edit' });
+  let releaseUser: () => void = () => undefined;
+  const userGate = new Promise<void>((resolve) => (releaseUser = resolve));
+  const updateChangeLog = note.updateChangeLogWithManager.bind(note);
+  jest.spyOn(note, 'updateChangeLogWithManager').mockImplementation(async (manager) => {
+    await userGate;
+    return updateChangeLog(manager);
+  });
+
+  const userSave = stageOffline(() => note.saveWithManager(dataSource.manager));
+  await sleep(10);
+  let releaseOther: () => void = () => undefined;
+  const otherGate = new Promise<void>((resolve) => (releaseOther = resolve));
+  const other = dataSource.manager.transaction(async () => {
+    await otherGate;
+    throw new Error('drain write failed');
+  });
+  await sleep(10);
+  releaseUser();
+  await userSave;
+  releaseOther();
+  await other.catch(() => undefined);
+
+  await expect(dataSource.getRepository(Note).findOneBy({ id: note.id })).resolves.toMatchObject({ text: 'user edit' });
 });

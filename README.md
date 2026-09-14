@@ -214,12 +214,16 @@ The base class for every synced entity (`StoreRecord extends BaseEntity`). It pr
 
 ### The change log
 
-Every local write records a `StoreChangeLog` row (store name + record id). Only the most recent
-pending change per record is kept. `CloudStore.updateCloudFromChangeLog` drains these rows to the
-cloud and removes each one after a successful upload; unsent rows survive restarts, which is what
-makes offline edits durable.
+Every local write records a `StoreChangeLog` row (store name + record id) in the same transaction
+as the record itself. There is one row per record; a further edit bumps the row's `version`.
+`CloudStore.updateCloudFromChangeLog` drains these rows to the cloud and, after a successful upload,
+deletes a row only if its `version` is still the one it read — an edit made while its record was
+uploading stays queued for the next drain. Unsent rows survive restarts, which is what makes offline
+edits durable.
 
-Add `StoreChangeLog` to your `DataSource` entity list.
+Add `StoreChangeLog` to your `DataSource` entity list. A database created before `version` existed
+needs the exported `AddStoreChangeLogVersion1789396900000` migration unless it runs with
+`synchronize: true`.
 
 ### Public vs. private records
 
@@ -359,6 +363,10 @@ Everything is exported from the package root.
 - `BaseUser` — base user entity (`authId`, `email`, `displayName`, …).
 - `StoreChangeLog` — the pending-change log entity (add to your `DataSource`).
 - `Meta` — per-collection version tracker.
+
+**Migrations**
+
+- `AddStoreChangeLogVersion1789396900000` — adds `StoreChangeLog.version`.
 
 **Stores**
 

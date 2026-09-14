@@ -15,6 +15,15 @@ export class StoreChangeLog extends BaseEntity {
   @Column()
   tableName: string;
 
+  // Bumped on every local change to the record, so a drain deletes the row only if no edit landed
+  // while that version was uploading. Rows that predate the column read as 0.
+  @Column({ default: 0 })
+  version: number = Date.now();
+
+  nextVersion() {
+    this.version = Math.max(Date.now(), this.version + 1);
+  }
+
   constructor(tableName: string, recordId: string) {
     super();
     this.recordId = recordId;

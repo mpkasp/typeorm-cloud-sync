@@ -87,11 +87,13 @@ export abstract class StoreRecord extends BaseEntity {
     entities: T[],
     options?: SaveOptions,
   ): Promise<T[]> {
-    const saved = await manager.save(entities, options);
-    for (const record of saved as unknown as StoreRecord[]) {
-      await record.updateChangeLogWithManager(manager);
-    }
-    return saved;
+    return manager.transaction(async (transactionManager) => {
+      const saved = await transactionManager.save(entities, options);
+      for (const record of saved as unknown as StoreRecord[]) {
+        await record.updateChangeLogWithManager(transactionManager);
+      }
+      return saved;
+    });
   }
 
   static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {
@@ -153,15 +155,17 @@ export abstract class StoreRecord extends BaseEntity {
     return reverse ? 'asc' : 'desc';
   }
 
-  // Queue this record for upload by adding a change-log row via the given manager. Only the most
-  // recent change to a record is kept, so an existing row is left in place.
+  // Queue this record for upload by adding a change-log row via the given manager. One row per record:
+  // an existing row gets a new version, which both tells an in-flight drain its upload is stale and
+  // fires the UPDATE that re-arms the drain.
   async updateChangeLogWithManager(manager: EntityManager): Promise<StoreChangeLog> {
     const existingChangeLog = await manager.getRepository(StoreChangeLog).findOneBy({
       tableName: storeNameOf(this),
       recordId: this.id,
     });
     if (existingChangeLog) {
-      return existingChangeLog;
+      existingChangeLog.nextVersion();
+      return manager.save(existingChangeLog);
     }
     return manager.save(new StoreChangeLog(storeNameOf(this), this.id!));
   }
@@ -172,11 +176,14 @@ export abstract class StoreRecord extends BaseEntity {
 
   async saveWithManager(manager: EntityManager, options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {
     console.debug('[save]', this, updateChangeLog, options);
-    const savedRecord = await manager.save(this, options);
-    if (updateChangeLog) {
-      await this.updateChangeLogWithManager(manager);
+    if (!updateChangeLog) {
+      return manager.save(this, options);
     }
-    return savedRecord;
+    return manager.transaction(async (transactionManager) => {
+      const savedRecord = await transactionManager.save(this, options);
+      await this.updateChangeLogWithManager(transactionManager);
+      return savedRecord;
+    });
   }
 
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {

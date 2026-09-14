@@ -6,6 +6,15 @@
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__tests__/store-change-log.subscriber.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/store-change-log.subscriber.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__tests__/store-record.model.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/store-record.model.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__tests__/sync-invariants.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/sync-invariants.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/store-change-log.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-change-log.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/models/store-record.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-record.model.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -233,7 +242,7 @@
       <workItem from="1784565484422" duration="3452000" />
       <workItem from="1784852276824" duration="412000" />
       <workItem from="1788400674773" duration="905000" />
-      <workItem from="1788452315104" duration="34736000" />
+      <workItem from="1788452315104" duration="35356000" />
     </task>
     <servers />
   </component>

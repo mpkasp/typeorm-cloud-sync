@@ -92,6 +92,27 @@ describe('StoreRecord.updateChangeLog', () => {
     await expect(changeLogs(dataSource).count()).resolves.toBe(1);
   });
 
+  test('gives the existing row a newer version on each change', async () => {
+    const note = await new Note({ text: 'x' }).save({}, false);
+
+    const first = await note.updateChangeLog();
+    const firstVersion = first.version;
+    await note.updateChangeLog();
+
+    const stored = await changeLogs(dataSource).findOneByOrFail({ id: first.id });
+    expect(stored.version).toBeGreaterThan(firstVersion);
+  });
+
+  test('rolls back the change-log row with a record save that fails', async () => {
+    const note = await new Note({ text: 'x' }).save({}, false);
+    jest.spyOn(note, 'updateChangeLogWithManager').mockRejectedValue(new Error('disk full'));
+    note.text = 'y';
+
+    await expect(note.save()).rejects.toThrow('disk full');
+
+    await expect(dataSource.getRepository(Note).findOneByOrFail({ id: note.id })).resolves.toMatchObject({ text: 'x' });
+  });
+
   test('separates records that share an id across stores', async () => {
     const note = await new Note({ text: 'x' }).save({}, false);
     const tag = await new Tag({ id: note.id, label: 'y' }).save({}, false);

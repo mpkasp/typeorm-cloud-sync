@@ -3,6 +3,8 @@ export { StoreRecord } from './models/store-record.model';
 export { BaseUser } from './models/base-user.model';
 export { Meta } from './models/meta.model';
 
+export { AddStoreChangeLogVersion1789396900000 } from './migrations/1789396900000-add-store-change-log-version';
+
 export { SqliteStore } from './sqlite-store';
 export { Tenant, TenantRegistry } from './tenant';
 export type { TenantOpener } from './tenant';

@@ -341,11 +341,18 @@ export abstract class CloudStore {
             console.debug('[updateCloudFromChangeLog] update store record');
             const newRecord = await this.updateStoreRecord(record);
 
-            console.debug('[updateCloudFromChangeLog] done, now remove change');
-            await this.manager.remove(change);
-
-            console.debug('[updateCloudFromChangeLog] save local record');
-            await newRecord.saveWithManager(this.manager, { listeners: false }, false);
+            console.debug('[updateCloudFromChangeLog] done, now remove change and write back changeId');
+            await this.manager.transaction(async (manager) => {
+              if (await this.removeChangeIfUnchanged(manager, change)) {
+                await manager
+                  .createQueryBuilder()
+                  .update(record.constructor as typeof StoreRecord)
+                  .set({ changeId: newRecord.changeId })
+                  .where('id = :id', { id: record.id })
+                  .callListeners(false)
+                  .execute();
+              }
+            });
 
             console.debug('[updateCloudFromChangeLog] starting subscription');
             await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
@@ -356,7 +363,7 @@ export abstract class CloudStore {
           }
         } else {
           console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
-          await this.manager.remove(change);
+          await this.removeChangeIfUnchanged(this.manager, change);
         }
       }
     } finally {
@@ -370,6 +377,19 @@ export abstract class CloudStore {
         console.warn('[updateCloudFromChangeLog] queued cloud push failed', e),
       );
     }
+  }
+
+  // Delete a drained change-log row only if it still holds the version the drain read. A local edit
+  // during the upload bumps the version, so the row stays queued and the edit uploads next drain; the
+  // local record is then left untouched rather than overwritten with the uploaded snapshot.
+  private async removeChangeIfUnchanged(manager: EntityManager, change: StoreChangeLog): Promise<boolean> {
+    const result = await manager
+      .createQueryBuilder()
+      .delete()
+      .from(StoreChangeLog)
+      .where('id = :id AND version = :version', { id: change.id, version: change.version })
+      .execute();
+    return result.affected === 1;
   }
 
   // Apply a page of records from the cloud. Records with a pending local change go through the

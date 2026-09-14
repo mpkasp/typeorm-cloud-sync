@@ -81,6 +81,23 @@ describe('when the subscriber holds a cloud', () => {
     expect(push).toHaveBeenCalledTimes(1);
   });
 
+  test('keeps data other subscribers put on the query runner', () => {
+    const event = commitEvent({ cloudOrigin: true });
+    subscriber.afterInsert(event);
+    subscriber.afterUpdate(event);
+
+    expect(event.queryRunner.data).toEqual({ cloudOrigin: true, StoreChangeLog: { insert: true, update: true } });
+  });
+
+  test('pushes once per commit, not again on a later commit that touched no change-log row', () => {
+    const event = commitEvent({});
+    subscriber.afterInsert(event);
+    subscriber.afterTransactionCommit(event);
+    subscriber.afterTransactionCommit(event);
+
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   test('ignores a commit that touched no change-log row', () => {
     subscriber.afterTransactionCommit(commitEvent({}));
 
