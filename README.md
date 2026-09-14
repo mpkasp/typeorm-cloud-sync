@@ -71,8 +71,10 @@ flowchart LR
    (`CloudStore.updateCloudFromChangeLog`). Each pending change is written to Firestore through the
    versioned write protocol, which allocates the next `changeId` inside a transaction and bumps the
    collection's `Meta` document.
-3. **Cloud changes** stream in over Firestore `onSnapshot` subscriptions. Only records with a
-   `changeId` greater than the highest one already stored locally are fetched. Records with a pending
+3. **Cloud changes** stream in over Firestore `onSnapshot` subscriptions. Each collection keeps a
+   download cursor in the local `Meta` table: the highest `changeId` the cloud has delivered and the
+   device has applied. Only records above it are fetched. Uploads never move it, so a document another
+   device wrote below a locally uploaded `changeId` still arrives. Records with a pending
    local change are merged by `SqliteStore.resolve` using last-write-wins on the record's `updated`
    timestamp; the rest — the whole page on an initial login — have no local edit to protect and are
    written to SQLite in a single chunked bulk save, so a large first download is a handful of writes
@@ -226,9 +228,11 @@ settles (including the private cloud finishing its setup). Call `CloudStore.drai
 resume handler to cover the last trigger. Each upload has a timeout (15 s); an upload that fails or
 times out leaves its row queued and the drain moves on to the next row.
 
-Add `StoreChangeLog` to your `DataSource` entity list. A database created before `version` existed
-needs the exported `AddStoreChangeLogVersion1789396900000` migration unless it runs with
-`synchronize: true`.
+Add `StoreChangeLog` and `Meta` to your `DataSource` entity list. A database created before
+`version` existed needs the exported `AddStoreChangeLogVersion1789396900000` migration, and one
+created before download cursors needs `MetaCursorIdentity1789400000000`, unless it runs with
+`synchronize: true`. The first catch-up on such a database starts from the collection's highest local
+`changeId`.
 
 ### Public vs. private records
 
@@ -367,11 +371,12 @@ Everything is exported from the package root.
 - `StoreRecord` — base class for synced entities.
 - `BaseUser` — base user entity (`authId`, `email`, `displayName`, …).
 - `StoreChangeLog` — the pending-change log entity (add to your `DataSource`).
-- `Meta` — per-collection version tracker.
+- `Meta` — per-collection download cursor (add to your `DataSource`).
 
 **Migrations**
 
 - `AddStoreChangeLogVersion1789396900000` — adds `StoreChangeLog.version`.
+- `MetaCursorIdentity1789400000000` — rekeys the local `meta` table on `(collection, isPrivate)`.
 
 **Stores**
 

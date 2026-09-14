@@ -167,11 +167,7 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
-    // Serialized behind the local transaction lock so the read does not land inside another
-    // collection's catch-up transaction on the shared query runner.
-    const latestChangeId = await serializeLocalTransaction(this.manager, () =>
-      StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
-    );
+    const latestChangeId = await this.readCursor(obj, isPrivate);
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -278,7 +274,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       records[1],
       records,
     );
-    await this.resolveRecords(obj, records);
+    await this.applyDelivery(obj, isPrivate, records);
   }
 
   private collectionPath(obj: StoreRecord): string {

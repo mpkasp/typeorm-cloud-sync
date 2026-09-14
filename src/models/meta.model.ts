@@ -1,32 +1,21 @@
-import { BaseEntity, Column, Entity, PrimaryColumn } from 'typeorm/browser';
-import { StoreRecord } from './store-record.model';
-import { storeNameOf } from './store-name';
+import { Column, Entity, PrimaryColumn } from 'typeorm/browser';
 
+// A collection's download cursor: the highest changeId the cloud has delivered and this device has
+// applied. Only cloud deliveries advance it (CloudStore.advanceCursor); an upload's changeId never does.
 @Entity({ name: 'meta' })
-export class Meta extends BaseEntity {
+export class Meta {
   @PrimaryColumn()
   public collection: string;
 
-  @Column({ nullable: false })
-  public changeId: number = 0;
+  @PrimaryColumn({ type: 'boolean' })
+  public isPrivate: boolean;
 
   @Column({ nullable: false })
-  public isPrivate: boolean = true;
+  public changeId: number;
 
-  constructor(collection: string, changeId: number, isPrivate: boolean) {
-    super();
-    this.changeId = changeId;
+  constructor(collection: string, isPrivate: boolean, changeId: number) {
     this.collection = collection;
     this.isPrivate = isPrivate;
-  }
-
-  static fromRecord(record: StoreRecord) {
-    console.log('[Meta - fromRecord]', storeNameOf(record), record.changeId, record.isPrivate, record);
-    const collection = Meta.collectionFromName(storeNameOf(record), record.isPrivate);
-    return new Meta(collection, record.changeId, record.isPrivate);
-  }
-
-  static collectionFromName(name: string, isPrivate: boolean) {
-    return isPrivate && name !== 'User' ? `User/${name}` : name;
+    this.changeId = changeId;
   }
 }

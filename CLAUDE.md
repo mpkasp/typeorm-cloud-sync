@@ -13,7 +13,7 @@ not visible to the app until it is pushed and re-pinned with `daily/scripts/upda
 
 ## Layout
 
-- `src/models/` — `StoreRecord` (base entity), `BaseUser`, `StoreChangeLog` (the upload outbox), `Meta`.
+- `src/models/` — `StoreRecord` (base entity), `BaseUser`, `StoreChangeLog` (the upload outbox), `Meta` (the download cursor).
 - `src/sqlite-store.ts` — the local side; `resolve()` is conflict resolution.
 - `src/cloud/cloud-store.ts` — abstract orchestration: drain (`updateCloudFromChangeLog`), download
   apply (`resolveRecords`), downloading refcount, subscribers, disposal.

@@ -2,6 +2,8 @@
 import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { StoreChangeLog } from '../models/store-change-log.model';
+import { Meta } from '../models/meta.model';
+import { storeNameOf } from '../models/store-name';
 
 import { DataSource, EntityManager, EntitySubscriberInterface, In } from 'typeorm/browser';
 import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription } from 'rxjs';
@@ -394,6 +396,47 @@ export abstract class CloudStore {
       .where('id = :id AND version = :version', { id: change.id, version: change.version })
       .execute();
     return result.affected === 1;
+  }
+
+  // The collection's download cursor. A database with no cursor row yet (one created before cursors
+  // were persisted) starts from its highest local changeId, and that value is stored as the row.
+  public readCursor(recordType: typeof StoreRecord, isPrivate: boolean): Promise<number> {
+    return serializeLocalTransaction(this.manager, async () => {
+      const collection = storeNameOf(recordType);
+      const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
+      if (meta) {
+        return meta.changeId;
+      }
+      const changeId = await StoreRecord.getLatestChangeId(
+        this.localStore.dataSource,
+        { type: recordType as any, name: collection },
+        isPrivate,
+      );
+      await this.manager.getRepository(Meta).save(new Meta(collection, isPrivate, changeId), { listeners: false });
+      return changeId;
+    });
+  }
+
+  // Moves the cursor forward to `changeId`, never back: deliveries can apply out of order.
+  public advanceCursor(recordType: typeof StoreRecord, isPrivate: boolean, changeId: number): Promise<void> {
+    return serializeLocalTransaction(this.manager, async () => {
+      const collection = storeNameOf(recordType);
+      const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
+      if (meta && meta.changeId >= changeId) {
+        return;
+      }
+      await this.manager.getRepository(Meta).save(new Meta(collection, isPrivate, changeId), { listeners: false });
+    });
+  }
+
+  // Apply one cloud delivery (a catch-up page or a live snapshot), then advance the cursor to the
+  // highest changeId it carried. The cursor moves only after the records are stored, and only here.
+  protected async applyDelivery(recordType: typeof StoreRecord, isPrivate: boolean, records: StoreRecord[]) {
+    if (records.length === 0) {
+      return;
+    }
+    await this.resolveRecords(recordType, records);
+    await this.advanceCursor(recordType, isPrivate, Math.max(...records.map((record) => record.changeId)));
   }
 
   // Apply a page of records from the cloud. Records with a pending local change go through the

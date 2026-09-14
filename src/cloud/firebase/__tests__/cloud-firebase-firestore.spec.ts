@@ -1,8 +1,9 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { getDocs, onSnapshot } from 'firebase/firestore';
+import { getDocs, onSnapshot, where } from 'firebase/firestore';
 import { SqliteStore } from '../../../sqlite-store';
 import { StoreChangeLog } from '../../../models/store-change-log.model';
+import { Meta } from '../../../models/meta.model';
 import { createTestDataSource, Note, silenceLibraryLogs, Tag, User } from '../../../__tests__/fake-entities';
 import { CloudFirebaseFirestore } from '../cloud-firebase-firestore';
 
@@ -58,7 +59,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000) {
 beforeEach(async () => {
   silenceLibraryLogs();
   listeners = [];
-  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
 
   (getDocs as jest.Mock).mockResolvedValue(snapshotOf([]));
   // Firestore hands a new listener the current result set immediately, then streams later changes
@@ -136,6 +137,13 @@ describe('subscribeObj live deliveries', () => {
     expect(stored.updatedMs).toEqual(expect.any(Number));
   });
 
+  test('advances the collection cursor to the highest changeId a delivery carried', async () => {
+    listeners[0](snapshotOf([tagDoc('tag-1', 8), tagDoc('tag-2', 7)]));
+    await waitFor(() => !cloud.downloading);
+
+    await expect(cloud.readCursor(Tag, false)).resolves.toBe(8);
+  });
+
   // A delivery that throws must not pin the indicator on: `downloading` gates updateCloudFromChangeLog,
   // so a stuck indicator would silently stop every later upload for the rest of the session.
   test('releases the indicator when a delivery fails to apply', async () => {
@@ -150,6 +158,26 @@ describe('subscribeObj live deliveries', () => {
   });
 });
 
+test('subscribeObj catches up from the stored cursor, not from the highest local changeId', async () => {
+  const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  await ds.getRepository(Meta).save(new Meta('Tag', false, 3));
+  // A changeId an upload wrote back locally, above documents other devices may still be writing.
+  await ds.manager.save(
+    Object.assign(new Tag({ id: 'uploaded', changeId: 50, isPrivate: false }), { createdMs: 1, updatedMs: 1 }),
+  );
+  (where as jest.Mock).mockClear();
+  const cursorCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+
+  try {
+    await cursorCloud.initialize(new SqliteStore(ds, User), {} as any);
+
+    expect(where).toHaveBeenCalledWith('changeId', '>', 3);
+  } finally {
+    cursorCloud.dispose();
+    await ds.destroy();
+  }
+});
+
 describe('subscribeObj paged catch-up', () => {
   const QUERY_LIMIT = 500;
 
@@ -161,7 +189,7 @@ describe('subscribeObj paged catch-up', () => {
       (getDocs as jest.Mock).mockResolvedValueOnce(snapshotOf(page));
     }
 
-    const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+    const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
     const pagedCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
 
     const getDocsCallsAtWrite: number[] = [];
@@ -190,6 +218,7 @@ describe('subscribeObj paged catch-up', () => {
       // Pipelining: the second page was already fetched by the time the first began writing. A serial
       // read (fetch, then write, then fetch) would record 1 here.
       expect(getDocsCallsAtWrite[0]).toBe(2);
+      await expect(pagedCloud.readCursor(Tag, false)).resolves.toBe(503);
     } finally {
       pagedCloud.dispose();
       await ds.destroy();

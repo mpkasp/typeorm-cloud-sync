@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { serializeLocalTransaction, SqliteStore, StoreChangeLog } from '../index';
+import { Meta, serializeLocalTransaction, SqliteStore, StoreChangeLog } from '../index';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
@@ -44,7 +44,7 @@ const stageOffline = async <T>(save: () => Promise<T>): Promise<T> => {
 
 beforeEach(async () => {
   silenceLibraryLogs();
-  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
   sqliteStore = new SqliteStore(dataSource, User);
   network = new BehaviorSubject<boolean>(true);
   cloud = new FakeCloudStore(User, [Tag], [Note], network);
@@ -192,4 +192,31 @@ test('a failed overlapping transaction does not undo a save that already resolve
   await other.catch(() => undefined);
 
   await expect(dataSource.getRepository(Note).findOneBy({ id: note.id })).resolves.toMatchObject({ text: 'user edit' });
+});
+
+// I3 — the download cursor is persisted per collection and advanced only by cloud deliveries. (F7, F19)
+test('deliveries applied out of order all land and leave the cursor at the highest changeId', async () => {
+  const delivery = (id: string, changeId: number) => [
+    new Note({ id, text: id, changeId, createdMs: 1000, updatedMs: 1000 }),
+  ];
+
+  await (cloud as any).applyDelivery(Note, true, delivery('ten', 10));
+  await (cloud as any).applyDelivery(Note, true, delivery('nine', 9));
+
+  await expect(dataSource.getRepository(Note).countBy({ id: 'ten' })).resolves.toBe(1);
+  await expect(dataSource.getRepository(Note).countBy({ id: 'nine' })).resolves.toBe(1);
+  await expect(cloud.readCursor(Note, true)).resolves.toBe(10);
+});
+
+test('an upload that writes a higher changeId locally does not move the cursor', async () => {
+  await (cloud as any).applyDelivery(Note, true, [
+    new Note({ id: 'ten', text: 'from cloud', changeId: 10, createdMs: 1000, updatedMs: 1000 }),
+  ]);
+
+  const note = await new Note({ text: 'local edit' }).saveWithManager(dataSource.manager);
+  await waitFor(async () => (await changeLogCount()) === 0);
+
+  const uploaded = await dataSource.getRepository(Note).findOneBy({ id: note.id });
+  expect(uploaded!.changeId).toBe(11);
+  await expect(cloud.readCursor(Note, true)).resolves.toBe(10);
 });

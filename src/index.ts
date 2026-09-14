@@ -4,6 +4,7 @@ export { BaseUser } from './models/base-user.model';
 export { Meta } from './models/meta.model';
 
 export { AddStoreChangeLogVersion1789396900000 } from './migrations/1789396900000-add-store-change-log-version';
+export { MetaCursorIdentity1789400000000 } from './migrations/1789400000000-meta-cursor-identity';
 
 export { SqliteStore } from './sqlite-store';
 export { serializeLocalTransaction } from './local-transaction-lock';

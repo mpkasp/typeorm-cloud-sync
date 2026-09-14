@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm/browser';
-import { BaseUser, SqliteStore, StoreChangeLog } from '../index';
+import { BaseUser, Meta, SqliteStore, StoreChangeLog } from '../index';
 import { StoreRecord } from '../models/store-record.model';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs } from './fake-entities';
 
@@ -30,7 +30,7 @@ const stealActiveRecordBinding = async () => {
 beforeEach(async () => {
   silenceLibraryLogs();
   otherDataSource = undefined;
-  dataSource = await createTestDataSource([BaseUser, Note, StoreChangeLog]);
+  dataSource = await createTestDataSource([BaseUser, Note, StoreChangeLog, Meta]);
   sqliteStore = new SqliteStore(dataSource, BaseUser);
 });
 
@@ -134,13 +134,17 @@ describe('resolve when the records match', () => {
 });
 
 describe('dropping records', () => {
-  test('dropPrivateTypeOrmCloudSyncRecords clears the change log only', async () => {
+  test('dropPrivateTypeOrmCloudSyncRecords clears the change log and private cursors only', async () => {
     const note = await new Note({ text: 'keep me' }).save();
+    await dataSource.getRepository(Meta).save([new Meta('Note', true, 7), new Meta('Note', false, 9)]);
 
     await sqliteStore.dropPrivateTypeOrmCloudSyncRecords();
 
     await expect(changeLogs(dataSource).count()).resolves.toBe(0);
     await expect(dataSource.getRepository(Note).findOneBy({ id: note.id })).resolves.not.toBeNull();
+    await expect(dataSource.getRepository(Meta).find()).resolves.toEqual([
+      expect.objectContaining({ collection: 'Note', isPrivate: false, changeId: 9 }),
+    ]);
   });
 
   test('dropPrivateRecords deletes private rows and keeps public ones', async () => {

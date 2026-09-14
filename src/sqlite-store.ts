@@ -1,6 +1,7 @@
 // tslint:disable: no-console
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
+import { Meta } from './models/meta.model';
 
 import { DataSource, EntityManager, SaveOptions } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
@@ -96,8 +97,11 @@ export class SqliteStore {
     return await record.saveWithManager(this.manager, options, updateChangeLog);
   }
 
+  // Clears the change log and the private download cursors, so the next account to sign in downloads
+  // its private collections from the start.
   public async dropPrivateTypeOrmCloudSyncRecords() {
     await this.dataSource.createQueryBuilder().delete().from(StoreChangeLog).execute();
+    await this.dataSource.createQueryBuilder().delete().from(Meta).where('isPrivate = 1').execute();
   }
 
   public async dropPrivateRecords(recordName: typeof StoreRecord) {

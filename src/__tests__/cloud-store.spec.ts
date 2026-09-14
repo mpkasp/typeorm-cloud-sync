@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { SqliteStore, StoreChangeLog } from '../index';
+import { Meta, SqliteStore, StoreChangeLog } from '../index';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
@@ -67,7 +67,7 @@ const stealActiveRecordBinding = async () => {
 beforeEach(async () => {
   silenceLibraryLogs();
   otherDataSource = undefined;
-  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog]);
+  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
   sqliteStore = new SqliteStore(dataSource, User);
   network = new BehaviorSubject<boolean>(true);
   cloud = new FakeCloudStore(User, [Tag], [Note], network);
@@ -391,6 +391,41 @@ describe('resolveRecord', () => {
     ]);
 
     expect(maxConcurrent).toBe(1);
+  });
+});
+
+describe('download cursor', () => {
+  beforeEach(async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+  });
+
+  test('a collection with no cursor row starts from its highest local changeId and stores it', async () => {
+    await dataSource.manager.save([
+      new Note({ id: 'a', changeId: 4, createdMs: 1000, updatedMs: 1000 }),
+      new Note({ id: 'b', changeId: 6, isPrivate: false, createdMs: 1000, updatedMs: 1000 }),
+    ]);
+
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(4);
+    await expect(
+      dataSource.getRepository(Meta).findOneBy({ collection: 'Note', isPrivate: true }),
+    ).resolves.toMatchObject({ changeId: 4 });
+  });
+
+  test('keeps private and public cursors of the same collection apart', async () => {
+    await cloud.advanceCursor(Note, true, 5);
+    await cloud.advanceCursor(Note, false, 8);
+
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(5);
+    await expect(cloud.readCursor(Note, false)).resolves.toBe(8);
+  });
+
+  test('an empty delivery leaves the cursor where it was', async () => {
+    await cloud.advanceCursor(Note, true, 5);
+
+    await (cloud as any).applyDelivery(Note, true, []);
+
+    await expect(cloud.readCursor(Note, true)).resolves.toBe(5);
   });
 });
 
