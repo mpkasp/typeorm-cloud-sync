@@ -346,6 +346,28 @@ describe('resolveRecord', () => {
     await expect(dataSource.getRepository(Note).count()).resolves.toBe(5);
     await expect(changeLogCount()).resolves.toBe(0);
   });
+
+  // Parallel per-collection catch-up (subscribePrivateCloud/subscribePublicCloud) can call resolveRecords
+  // concurrently, but the local database is a single writer — so the resolves must not overlap.
+  test('serializes concurrent resolves so the single-writer database is never entered twice at once', async () => {
+    await dataSource.manager.save([new StoreChangeLog('Note', 'a'), new StoreChangeLog('Note', 'b')]);
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    jest.spyOn(sqliteStore, 'resolve').mockImplementation(async () => {
+      inFlight++;
+      maxConcurrent = Math.max(maxConcurrent, inFlight);
+      await new Promise((r) => setTimeout(r, 10));
+      inFlight--;
+      return new Note({ text: 'kept' });
+    });
+
+    await Promise.all([
+      (cloud as any).resolveRecords(Note, [new Note({ id: 'a' })]),
+      (cloud as any).resolveRecords(Note, [new Note({ id: 'b' })]),
+    ]);
+
+    expect(maxConcurrent).toBe(1);
+  });
 });
 
 describe('with the ActiveRecord global bound to another database', () => {

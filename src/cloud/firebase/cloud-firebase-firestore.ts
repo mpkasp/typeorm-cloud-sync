@@ -123,31 +123,26 @@ export class CloudFirebaseFirestore extends CloudStore {
     return data;
   }
 
+  // Each record type is an independent collection with its own changeId cursor and conflict resolution,
+  // so their catch-up round trips can run concurrently rather than one after another — the difference
+  // between one network latency and the sum of them on launch. The database writes they produce are
+  // still serialized (CloudStore.resolveRecords funnels them through one queue), so only the fetches
+  // overlap. subscribeObj resolves once its listener's first delivery lands, so awaiting them together
+  // preserves the same "private cloud is up" guarantee the serial loop gave.
   protected async subscribePublicCloud() {
-    // console.log('[CloudFirebaseFirestore - subscribePublicCloud] subscribing to public records!');
-    for (const PublicRecord of this.publicRecords) {
-      console.debug('[CloudFirebaseFirestore - subscribePublicCloud]', PublicRecord.name);
-      await this.subscribeObj(PublicRecord, false);
-      // console.log('[CloudFirebaseFirestore - subscribePublicCloud] done', PublicRecord.name);
-    }
+    await Promise.all(this.publicRecords.map((PublicRecord) => this.subscribeObj(PublicRecord, false)));
   }
 
   protected async subscribePrivateCloud() {
-    // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] subscribing to private records!');
     if (this.privateCloudInitialized) {
       console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] already initialized');
       return;
     }
+    // The User record is fetched first and alone: every private collection's path is resolved through
+    // the local user (its authId), so it must exist before the others subscribe.
     console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
-    // console.log('[CloudFirebaseFirestore - subscribePrivateCloud] done User');
-    // for (let i = 0; i < this.privateRecords.length; i++) {
-    //   const PrivateRecord = this.privateRecords[i];
-    for (const PrivateRecord of this.privateRecords) {
-      console.debug('[CloudFirebaseFirestore - subscribePrivateCloud]', PrivateRecord.name);
-      await this.subscribeObj(PrivateRecord, true);
-      console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] done', PrivateRecord.name);
-    }
+    await Promise.all(this.privateRecords.map((PrivateRecord) => this.subscribeObj(PrivateRecord, true)));
     this.privateCloudInitialized = true;
   }
 
