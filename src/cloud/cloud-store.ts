@@ -90,12 +90,15 @@ export abstract class CloudStore {
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
-  // A one-at-a-time queue for cloud-origin writes. The initial catch-up now fetches every collection
-  // in parallel (see the adapter's subscribePrivateCloud/subscribePublicCloud), but the local database
-  // is a single writer, so their resolves must not overlap — two concurrent manager.save() calls on the
-  // one DataSource race the connection. The network round trips, which are the real cost, still overlap;
-  // only the DB apply is serialized. Chained so a failed resolve does not wedge the queue.
-  private writeChain: Promise<unknown> = Promise.resolve();
+  // A one-at-a-time queue for cloud-origin DATABASE access — reads and writes alike. The initial
+  // catch-up fetches every collection in parallel (see the adapter's subscribePrivateCloud/
+  // subscribePublicCloud), but the local DataSource is a single connection that cannot service
+  // overlapping operations: two concurrent calls — a save racing another save, or a getLatestChangeId
+  // read racing a save — corrupt the connection and surface as "Cannot read properties of undefined
+  // (reading 'query')". So every local DB touch on a cloud path funnels through here; the network round
+  // trips, which are the real cost, still overlap outside it. Chained so a failed op does not wedge the
+  // queue.
+  private dbAccessChain: Promise<unknown> = Promise.resolve();
 
   // Hold the downloading indicator up for the duration of `work`. Nests: only the outermost pair emits.
   protected async trackDownload<T>(work: () => Promise<T>): Promise<T> {
@@ -374,12 +377,14 @@ export abstract class CloudStore {
   // and they are written in a single chunked, transactional bulk save instead of one round-trip each.
   // On an initial login the change log is empty, so the whole page takes the bulk path — the
   // difference between ~2 writes and ~1000 read/write round-trips for a 500-record page.
-  // Serialize cloud-origin writes onto one queue, so parallel per-collection catch-up cannot issue
-  // overlapping database work. Runs `work` after whatever is already queued, whether that settled or
-  // threw, and never lets a rejection break the chain for the next caller.
-  protected serializeWrite<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.writeChain.then(work, work);
-    this.writeChain = run.then(
+  // Serialize a cloud-origin local-database operation (read or write) onto one queue, so parallel
+  // per-collection catch-up cannot issue overlapping work on the single DataSource connection. Runs
+  // `work` after whatever is already queued, whether that settled or threw, and never lets a rejection
+  // break the chain for the next caller. Callers must not nest a serializeDbAccess inside another (the
+  // inner would await the outer through the shared chain and deadlock).
+  protected serializeDbAccess<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.dbAccessChain.then(work, work);
+    this.dbAccessChain = run.then(
       () => undefined,
       () => undefined,
     );
@@ -390,7 +395,7 @@ export abstract class CloudStore {
     if (objs.length === 0) {
       return [];
     }
-    return this.serializeWrite(() => this.resolveRecordsLocked(recordType, objs));
+    return this.serializeDbAccess(() => this.resolveRecordsLocked(recordType, objs));
   }
 
   private async resolveRecordsLocked(recordType: typeof StoreRecord, objs: StoreRecord[]) {

@@ -82,6 +82,10 @@ export class CloudFirebaseFirestore extends CloudStore {
     // `StoreRecord.getLatestChangeId(this.localStore.dataSource, ...)` call, now passed in as a
     // callback — the one piece the server can't supply (it seeds 0 instead).
     await this.writer.updateStoreRecord(this.asVersioned(obj), {
+      // NOT wrapped in serializeDbAccess: updateStoreRecord runs on the change-log push path, which a
+      // subscriber can fire from inside resolveRecordsLocked (itself already holding the queue), so
+      // serializing this read would nest the queue in itself and deadlock. It is a single lightweight
+      // read and, unlike the parallel download catch-up, not part of a concurrent fan-out.
       seedChangeId: () =>
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
@@ -177,7 +181,12 @@ export class CloudFirebaseFirestore extends CloudStore {
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
-    const latestChangeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+    // Serialized: this local read runs concurrently with every other collection's catch-up (the
+    // subscribe* fan-out is parallel) and with their resolveRecords writes; overlapping the single
+    // DataSource connection is what corrupted it into "undefined (reading 'query')".
+    const latestChangeId = await this.serializeDbAccess(() =>
+      StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
+    );
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -239,7 +248,11 @@ export class CloudFirebaseFirestore extends CloudStore {
         // Each delivery reads its own changeId: two callbacks can overlap, and sharing the outer
         // latestChangeId would let one clobber the other's cursor.
         void this.trackDownload(async () => {
-          const changeId = await StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate);
+          // Serialized like the setup read above: a live delivery can land while another collection's
+          // catch-up or a change-log push is mid-operation on the same connection.
+          const changeId = await this.serializeDbAccess(() =>
+            StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
+          );
           await this.resolveSnapshot(obj, snapshot, changeId, isPrivate, collectionPath);
         })
           .catch((e) =>
