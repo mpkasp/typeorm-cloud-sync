@@ -10,7 +10,7 @@ import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription 
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUserSubscriber } from '../base-user.subscriber';
 import { BaseUser } from '../models/base-user.model';
-import { serializeLocalTransaction } from '../local-transaction-lock';
+import { localTransactionsSettled, serializeLocalTransaction } from '../local-transaction-lock';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -66,6 +66,8 @@ export interface DeliveryStream {
   failed: boolean;
 }
 
+class UploadTimeoutError extends Error {}
+
 export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(isOnline());
   public network$: Observable<boolean> = this.networkSubject.asObservable();
@@ -83,6 +85,8 @@ export abstract class CloudStore {
   // in flight at the same time. As a boolean, whichever finished first reported "done" while the
   // others were still writing. Subscribers only see a transition when the count leaves or reaches 0.
   private downloadCount: number = 0;
+  private downloadsSettled: Promise<void> | null = null;
+  private settleDownloads: () => void = () => undefined;
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
   public get downloading(): boolean {
@@ -92,6 +96,9 @@ export abstract class CloudStore {
   protected privateCloudInitialized: boolean = false;
   protected localStore: SqliteStore;
   private uploading: boolean = false;
+  // Set first thing in dispose(). Work already queued on the local transaction lock checks it once it
+  // runs, so nothing this store queued touches the DataSource after the tenant destroys it.
+  protected disposed: boolean = false;
   private attachedSubscribers: EntitySubscriberInterface<any>[] = [];
   private readonly subscriptions = new Subscription();
   private drainInFlight: Promise<void> | null = null;
@@ -113,12 +120,15 @@ export abstract class CloudStore {
 
   private beginDownload() {
     if (this.downloadCount++ === 0) {
+      this.downloadsSettled = new Promise<void>((resolve) => (this.settleDownloads = resolve));
       this.downloadingSubject.next(true);
     }
   }
 
   private endDownload() {
     if (this.downloadCount > 0 && --this.downloadCount === 0) {
+      this.downloadsSettled = null;
+      this.settleDownloads();
       this.downloadingSubject.next(false);
     }
   }
@@ -186,27 +196,38 @@ export abstract class CloudStore {
     this.attachedSubscribers = [];
   }
 
-  // Resolves once no drain is in flight, so a caller can tear down the DataSource without pulling
-  // it out from under one. Bounded, so a drain stuck on a slow cloud call cannot block disposal forever.
+  // Resolves once no drain, download or serialized local transaction is in flight, so a caller can tear
+  // down the DataSource without pulling it out from under one. Bounded, so work stuck on a slow cloud
+  // call cannot block disposal forever. Checks again while a drain or download started in the meantime.
   public async whenIdle(timeoutMs: number = 5000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    while (this.drainInFlight) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        console.warn('[CloudStore] timed out waiting for the change-log drain to finish');
+    do {
+      const transactions = this.localStore ? localTransactionsSettled(this.localStore.dataSource) : null;
+      const inFlight = Promise.all([this.drainInFlight, this.downloadsSettled, transactions]);
+      if (!(await this.settlesBefore(inFlight, deadline))) {
+        console.warn('[CloudStore] timed out waiting for sync work to finish');
         return;
       }
-      let timer: any;
-      await Promise.race([
-        this.drainInFlight,
-        new Promise<void>((resolve) => (timer = setTimeout(resolve, remaining))),
-      ]);
+    } while (this.drainInFlight || this.downloadsSettled);
+  }
+
+  private async settlesBefore(work: Promise<unknown>, deadline: number): Promise<boolean> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      return false;
+    }
+    let timer: any;
+    const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), remaining)));
+    try {
+      return await Promise.race([work.then(() => true), timedOut]);
+    } finally {
       clearTimeout(timer);
     }
   }
 
   // Release this tenant's hold on its DataSource and cloud. Leaves other tenants untouched.
   public dispose() {
+    this.disposed = true;
     this.detachSubscribers();
     this.unsubscribePrivateCloud();
     this.subscriptions.unsubscribe();
@@ -237,6 +258,9 @@ export abstract class CloudStore {
   private subscribeLocalUser() {
     console.debug('[CloudStore - subscribeLocalUser] setup.');
     const subscription = this.userSubject.subscribe((user) => {
+      if (this.disposed) {
+        return;
+      }
       // Private cloud subscriptions depend on auth state and local user availability so we can subscribe
       // This may mess with sign out logic... need to think...
       console.debug('[CloudStore - subscribeLocalUser] ', this.lastUser, user);
@@ -333,6 +357,9 @@ export abstract class CloudStore {
   }
 
   private canDrain(): boolean {
+    if (this.disposed) {
+      return false;
+    }
     if (!this.networkSubject.getValue()) {
       console.debug('[updateCloudFromChangeLog] No network, not updating cloud.');
       return false;
@@ -348,19 +375,23 @@ export abstract class CloudStore {
     return true;
   }
 
+  // The change log and its records are read in one hold of the local transaction lock, so the drain
+  // never reads rows of a transaction that is still open and could roll back. Uploads run outside it.
+  // A timeout ends the pass: the cloud is unreachable, and every remaining row would wait out its own.
   private async drainChangeLogOnce() {
-    const changes = await this.manager.getRepository(StoreChangeLog).find();
-    for (const change of changes) {
-      const record = await change.getRecordWithManager(this.manager);
-      if (record == null) {
-        console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
-        await serializeLocalTransaction(this.manager, () => this.removeChangeIfUnchanged(this.manager, change));
-        continue;
+    const pendingChanges = await serializeLocalTransaction(this.manager, () => this.readPendingChangesLocked());
+    for (const { change, record } of pendingChanges) {
+      if (this.disposed) {
+        return;
       }
       try {
         const newRecord = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
-        await serializeLocalTransaction(this.manager, () =>
-          this.manager.transaction(async (manager) => {
+        await serializeLocalTransaction(this.manager, async () => {
+          // Tenant.dispose destroys the DataSource under this lock, so the check cannot go stale.
+          if (!this.localStore.dataSource.isInitialized) {
+            return;
+          }
+          await this.manager.transaction(async (manager) => {
             if (await this.removeChangeIfUnchanged(manager, change)) {
               await manager
                 .createQueryBuilder()
@@ -370,18 +401,39 @@ export abstract class CloudStore {
                 .callListeners(false)
                 .execute();
             }
-          }),
-        );
+          });
+        });
       } catch (err) {
+        if (err instanceof UploadTimeoutError) {
+          console.warn('[updateCloudFromChangeLog] upload timed out, leaving the remaining changes queued', err);
+          return;
+        }
         console.warn('[updateCloudFromChangeLog] upload failed, leaving the change queued', err);
       }
     }
   }
 
+  private async readPendingChangesLocked(): Promise<{ change: StoreChangeLog; record: StoreRecord }[]> {
+    if (this.disposed) {
+      return [];
+    }
+    const pendingChanges: { change: StoreChangeLog; record: StoreRecord }[] = [];
+    for (const change of await this.manager.getRepository(StoreChangeLog).find()) {
+      const record = await change.getRecordWithManager(this.manager);
+      if (record == null) {
+        console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
+        await this.removeChangeIfUnchanged(this.manager, change);
+        continue;
+      }
+      pendingChanges.push({ change, record });
+    }
+    return pendingChanges;
+  }
+
   private async withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
+      timer = setTimeout(() => reject(new UploadTimeoutError(`timed out after ${timeoutMs} ms`)), timeoutMs);
     });
     try {
       return await Promise.race([work, timeout]);
@@ -407,6 +459,9 @@ export abstract class CloudStore {
   // were persisted) starts from its highest local changeId, and that value is stored as the row.
   public readCursor(recordType: typeof StoreRecord, isPrivate: boolean): Promise<number> {
     return serializeLocalTransaction(this.manager, async () => {
+      if (this.disposed) {
+        throw new Error('[CloudStore] readCursor on a disposed store');
+      }
       const collection = storeNameOf(recordType);
       const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
       if (meta) {
@@ -428,6 +483,9 @@ export abstract class CloudStore {
   }
 
   private async advanceCursorLocked(recordType: typeof StoreRecord, isPrivate: boolean, changeId: number) {
+    if (this.disposed) {
+      return;
+    }
     const collection = storeNameOf(recordType);
     const meta = await this.manager.getRepository(Meta).findOneBy({ collection, isPrivate });
     if (meta && meta.changeId >= changeId) {
@@ -452,6 +510,9 @@ export abstract class CloudStore {
       return;
     }
     await serializeLocalTransaction(this.manager, async () => {
+      if (this.disposed) {
+        return;
+      }
       try {
         await this.resolveRecordsLocked(recordType, records);
       } catch (error) {
@@ -477,6 +538,9 @@ export abstract class CloudStore {
   }
 
   private async resolveRecordsLocked(recordType: typeof StoreRecord, objs: StoreRecord[]) {
+    if (this.disposed) {
+      return [];
+    }
     // Drop anything the local row already has: a re-delivered document (a listener reopened
     // over records already stored) or a stale page. Comparing against the current changeId rather than
     // relying on the cloud to only ever send new data keeps re-delivery a true no-op.

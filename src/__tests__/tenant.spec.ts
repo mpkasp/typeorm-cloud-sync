@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { SqliteStore, StoreChangeLog, Tenant, TenantRegistry } from '../index';
+import { serializeLocalTransaction, SqliteStore, StoreChangeLog, Tenant, TenantRegistry } from '../index';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
@@ -190,6 +190,48 @@ test('dispose waits for an in-flight drain before destroying the database', asyn
 
   expect(dataSource.isInitialized).toBe(false);
   expect((tenant.cloud as FakeCloudStore).port.get(`User/auth-A/Note/${note.id}`)).toBeDefined();
+});
+
+test('dispose waits for a local transaction, and a cloud apply queued behind it writes nothing', async () => {
+  const tenant = await registry.open('auth-A');
+  await waitFor(() => !(tenant.cloud as any).updatingCloudFromChangeLog);
+  const dataSource = tenant.localStore.dataSource;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const held = serializeLocalTransaction(tenant.localStore.manager, () => gate);
+
+  const closing = registry.close('auth-A');
+  const save = jest.spyOn(tenant.localStore.manager, 'save');
+  const apply = (tenant.cloud as any).applyDelivery(Note, true, [
+    new Note({ id: 'arrived-late', text: 'cloud', changeId: 5, createdMs: 1000, updatedMs: 1000 }),
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(dataSource.isInitialized).toBe(true);
+
+  release();
+  await held;
+  await expect(apply).resolves.toBeUndefined();
+  await closing;
+
+  expect(dataSource.isInitialized).toBe(false);
+  expect(save).not.toHaveBeenCalled();
+});
+
+test('dispose waits for a download in flight', async () => {
+  const tenant = await registry.open('auth-A');
+  const dataSource = tenant.localStore.dataSource;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const download = (tenant.cloud as any).trackDownload(() => gate);
+
+  const closing = registry.close('auth-A');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(dataSource.isInitialized).toBe(true);
+
+  release();
+  await download;
+  await closing;
+  expect(dataSource.isInitialized).toBe(false);
 });
 
 test('whenIdle gives up on a drain that never settles', async () => {

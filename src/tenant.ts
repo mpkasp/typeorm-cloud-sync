@@ -1,5 +1,6 @@
 import { SqliteStore } from './sqlite-store';
 import { CloudStore } from './cloud/cloud-store';
+import { serializeLocalTransaction } from './local-transaction-lock';
 
 // One account's complete, isolated stack: its own DataSource (held by the SqliteStore) and its own
 // CloudStore. Isolation is structural rather than a matter of query discipline — a query on one
@@ -17,12 +18,13 @@ export class Tenant {
     public readonly cloud: CloudStore,
   ) {}
 
-  // Stop the cloud first so no new work starts, then let any in-flight drain finish before the
-  // database goes away underneath it.
+  // Stop the cloud first so no new work starts, then let in-flight drains, downloads and local
+  // transactions finish before the database goes away underneath them. The destroy itself queues on
+  // the local transaction lock: work queued behind it finds the store disposed and does nothing.
   async dispose(): Promise<void> {
     this.cloud.dispose();
     await this.cloud.whenIdle();
-    await this.localStore.dataSource.destroy();
+    await serializeLocalTransaction(this.localStore.manager, () => this.localStore.dataSource.destroy());
   }
 }
 

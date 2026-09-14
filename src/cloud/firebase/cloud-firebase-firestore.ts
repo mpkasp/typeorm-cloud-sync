@@ -158,7 +158,9 @@ export class CloudFirebaseFirestore extends CloudStore {
     console.debug('[CloudFirebaseFirestore - subscribePrivateCloud] User');
     await this.subscribeCloudUser();
     await Promise.all(this.privateRecords.map((PrivateRecord) => this.subscribeObj(PrivateRecord, true)));
-    this.privateCloudInitialized = true;
+    if (!this.disposed) {
+      this.privateCloudInitialized = true;
+    }
   }
 
   protected unsubscribePrivateCloud() {
@@ -169,7 +171,18 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
-    const cursor = await this.readCursor(obj, isPrivate);
+    if (this.disposed) {
+      return;
+    }
+    let cursor: number;
+    try {
+      cursor = await this.readCursor(obj, isPrivate);
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+      throw error;
+    }
     const objInstance = new obj();
     objInstance.isPrivate = isPrivate;
     const collectionPath = this.collectionPath(objInstance);
@@ -191,6 +204,9 @@ export class CloudFirebaseFirestore extends CloudStore {
           return (await getDocs(pageQuery)).docs;
         };
         for await (const page of catchUpPages(fetchPage, CATCH_UP_PAGE_SIZE)) {
+          if (this.disposed) {
+            return;
+          }
           console.debug(`[CloudFirebaseFirestore - subscribeObj] Downloading ${collectionPath}, size: ${page.length}`);
           await this.resolveSnapshot(obj, page, isPrivate, collectionPath, stream);
           listenerAnchor = page[page.length - 1].data().changeId;
@@ -198,6 +214,11 @@ export class CloudFirebaseFirestore extends CloudStore {
       });
     } catch (error) {
       console.warn('[CloudFirebaseFirestore - subscribeObj] catch-up failed', collectionPath, error);
+    }
+    // Disposed during the catch-up: its subscriptions were already torn down, so a listener opened
+    // now would never be.
+    if (this.disposed) {
+      return;
     }
 
     return new Promise<void>((resolve) => {
@@ -216,6 +237,10 @@ export class CloudFirebaseFirestore extends CloudStore {
       const unsubscribe = onSnapshot(
         liveQuery,
         (snapshot) => {
+          if (this.disposed) {
+            settle();
+            return;
+          }
           const changedDocuments = snapshot
             .docChanges()
             .filter((change) => change.type === 'added' || change.type === 'modified')
@@ -238,7 +263,14 @@ export class CloudFirebaseFirestore extends CloudStore {
         },
       );
 
-      this.firestoreSubscriptions[storeNameOf(objInstance)] = { record: obj, unsubscribe };
+      // Unsubscribing settles setup too: a listener torn down before its first delivery never calls back.
+      this.firestoreSubscriptions[storeNameOf(objInstance)] = {
+        record: obj,
+        unsubscribe: () => {
+          unsubscribe();
+          settle();
+        },
+      };
     });
   }
 
@@ -323,6 +355,10 @@ export class CloudFirebaseFirestore extends CloudStore {
       const unsubscribe = onSnapshot(
         docRef,
         async (snapshot) => {
+          if (this.disposed) {
+            settle();
+            return;
+          }
           try {
             if (snapshot.exists()) {
               const data = this.deserialize(snapshot.data(), snapshot.id, true);
@@ -330,9 +366,11 @@ export class CloudFirebaseFirestore extends CloudStore {
               const currentUser = this.user;
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
               const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-              await serializeLocalTransaction(this.manager, () =>
-                updatedUser.saveWithManager(this.manager, { listeners: false }, false),
-              );
+              await serializeLocalTransaction(this.manager, async () => {
+                if (!this.disposed) {
+                  await updatedUser.saveWithManager(this.manager, { listeners: false }, false);
+                }
+              });
             } else {
               // Nothing in the cloud yet: the local record is the only copy, and the drain uploads it.
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] no cloud user document yet');
@@ -348,7 +386,13 @@ export class CloudFirebaseFirestore extends CloudStore {
           settle();
         },
       );
-      this.firestoreSubscriptions['User'] = { record: BaseUser, unsubscribe };
+      this.firestoreSubscriptions['User'] = {
+        record: BaseUser,
+        unsubscribe: () => {
+          unsubscribe();
+          settle();
+        },
+      };
     });
   }
 }

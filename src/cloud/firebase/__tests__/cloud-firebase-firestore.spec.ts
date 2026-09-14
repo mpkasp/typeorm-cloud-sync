@@ -184,6 +184,15 @@ describe('subscribeObj live deliveries', () => {
     await expect(cloud.readCursor(Tag, false)).resolves.toBe(0);
   });
 
+  test('ignores a delivery that arrives after dispose', async () => {
+    cloud.dispose();
+
+    listeners[0](snapshotOf([tagDoc('tag-1', 7)]));
+
+    expect(cloud.downloading).toBe(false);
+    expect(await dataSource.getRepository(Tag).count()).toBe(0);
+  });
+
   // A delivery that throws must not pin the indicator on: `downloading` gates updateCloudFromChangeLog,
   // so a stuck indicator would silently stop every later upload for the rest of the session.
   test('releases the indicator when a delivery fails to apply', async () => {
@@ -214,6 +223,41 @@ test('subscribeObj catches up from the stored cursor, not from the highest local
     expect(where).toHaveBeenCalledWith('changeId', '>', 3);
   } finally {
     cursorCloud.dispose();
+    await ds.destroy();
+  }
+});
+
+test('disposing during the catch-up opens no listener and settles setup', async () => {
+  const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  const disposingCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+  (getDocs as jest.Mock).mockImplementationOnce(async () => {
+    disposingCloud.dispose();
+    return snapshotOf([tagDoc('tag-1', 7)]);
+  });
+  (onSnapshot as jest.Mock).mockClear();
+
+  try {
+    await disposingCloud.initialize(new SqliteStore(ds, User), {} as any);
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(await ds.getRepository(Tag).count()).toBe(0);
+    expect(disposingCloud.downloading).toBe(false);
+  } finally {
+    await ds.destroy();
+  }
+});
+
+test('unsubscribing before the first delivery settles setup', async () => {
+  const ds = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  const silentCloud = new CloudFirebaseFirestore(User, [Tag], [], new BehaviorSubject<boolean>(true));
+  (onSnapshot as jest.Mock).mockImplementationOnce(() => {
+    Promise.resolve().then(() => silentCloud.dispose());
+    return () => undefined;
+  });
+
+  try {
+    await silentCloud.initialize(new SqliteStore(ds, User), {} as any);
+    expect(silentCloud.downloading).toBe(false);
+  } finally {
     await ds.destroy();
   }
 });

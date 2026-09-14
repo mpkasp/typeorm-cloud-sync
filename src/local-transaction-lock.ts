@@ -22,3 +22,8 @@ export function serializeLocalTransaction<T>(manager: EntityManager, work: () =>
   );
   return run;
 }
+
+// Resolves once every serialized transaction queued on `dataSource` so far has settled.
+export function localTransactionsSettled(dataSource: DataSource): Promise<void> {
+  return (transactionChains.get(dataSource) ?? Promise.resolve()).then(() => undefined);
+}

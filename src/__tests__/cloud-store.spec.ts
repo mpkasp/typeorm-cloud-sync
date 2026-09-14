@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { Meta, SqliteStore, StoreChangeLog } from '../index';
+import { Meta, serializeLocalTransaction, SqliteStore, StoreChangeLog } from '../index';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
@@ -282,21 +282,78 @@ describe('updateCloudFromChangeLog drain', () => {
     expect(await changeLogCount()).toBe(0);
   });
 
-  test('an upload that never settles does not stop the next row from uploading', async () => {
+  // A timeout means the cloud is unreachable: every remaining row would wait out its own timeout.
+  test('an upload that times out ends the pass, and the next drain uploads the rest', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     (cloud as any).uploadTimeoutMs = 50;
-    const stuck = await stageOffline(() => new Note({ text: 'stuck' }).save());
+    network.next(false);
+    const stuck = await new Note({ text: 'stuck' }).save();
+    const next = await new Note({ text: 'next' }).save();
+    const upload = cloud.updateStoreRecord.bind(cloud);
+    const updateStoreRecord = jest
+      .spyOn(cloud, 'updateStoreRecord')
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockImplementation((record) => upload(record));
+
+    network.next(true);
+    await cloud.whenIdle();
+
+    expect(updateStoreRecord).toHaveBeenCalledTimes(1);
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${next.id}`)).toBeUndefined();
+    expect(await changeLogCount()).toBe(2);
+
+    await cloud.drain();
+
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${stuck.id}`)).toMatchObject({ text: 'stuck' });
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${next.id}`)).toMatchObject({ text: 'next' });
+    expect(await changeLogCount()).toBe(0);
+  });
+
+  test('an upload that fails for another reason does not stop the next row from uploading', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    network.next(false);
+    const failing = await new Note({ text: 'failing' }).save();
+    const next = await new Note({ text: 'next' }).save();
     const upload = cloud.updateStoreRecord.bind(cloud);
     jest
       .spyOn(cloud, 'updateStoreRecord')
-      .mockImplementation((record) => (record.id === stuck.id ? new Promise(() => undefined) : upload(record)));
-    const next = await stageOffline(() => new Note({ text: 'next' }).save());
+      .mockImplementation((record) =>
+        record.id === failing.id ? Promise.reject(new Error('permission-denied')) : upload(record),
+      );
 
-    await cloud.updateCloudFromChangeLog();
+    network.next(true);
+    await cloud.whenIdle();
 
     expect(cloud.port.get(`User/${AUTH_ID}/Note/${next.id}`)).toMatchObject({ text: 'next' });
-    expect(cloud.port.get(`User/${AUTH_ID}/Note/${stuck.id}`)).toBeUndefined();
     expect(await changeLogCount()).toBe(1);
+  });
+
+  // sqljs and Capacitor share one query runner, so a read outside the lock sees an open transaction's
+  // rows. Uploading one that then rolls back would put an edit in the cloud the user never committed.
+  test('never uploads a record from a transaction that rolls back', async () => {
+    let entered: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const rolledBack = serializeLocalTransaction(dataSource.manager, () =>
+      dataSource.manager.transaction(async (manager) => {
+        await new Note({ text: 'never committed' }).saveWithManager(manager);
+        entered();
+        await gate;
+        throw new Error('rolled back');
+      }),
+    ).catch(() => undefined);
+    await inside;
+
+    const drained = cloud.drain();
+    // Gives a drain that does not wait for the lock time to read the open transaction's rows.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await rolledBack;
+    await drained;
+
+    expect(cloud.port.paths().filter((path) => path.includes('/Note/'))).toEqual([]);
+    expect(await changeLogCount()).toBe(0);
   });
 
   test('keeps the change-log row when the upload fails', async () => {
@@ -343,6 +400,8 @@ describe('resolveRecord', () => {
   test('resolveRecords keeps only the records that changed', async () => {
     // Both ids have a pending local change, so they take the per-record conflict path where resolve
     // decides what to keep. Without a pending change they would take the bulk save path instead.
+    // Offline, so a drain does not drop the rows for having no local record.
+    network.next(false);
     await dataSource.manager.save([new StoreChangeLog('Note', 'a'), new StoreChangeLog('Note', 'b')]);
     jest
       .spyOn(sqliteStore, 'resolve')
@@ -374,6 +433,7 @@ describe('resolveRecord', () => {
   // Parallel per-collection catch-up (subscribePrivateCloud/subscribePublicCloud) can call resolveRecords
   // concurrently, but the local database is a single writer — so the resolves must not overlap.
   test('serializes concurrent resolves so the single-writer database is never entered twice at once', async () => {
+    network.next(false);
     await dataSource.manager.save([new StoreChangeLog('Note', 'a'), new StoreChangeLog('Note', 'b')]);
     let inFlight = 0;
     let maxConcurrent = 0;
