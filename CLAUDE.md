@@ -39,7 +39,8 @@ Every change must preserve these. When a change touches one, add or update a tes
 5. **The drain has a fixed trigger set and cannot wedge:** commit, network up, private cloud
    initialized, download settled, app resume. Per-record timeout; a failure continues the loop.
 6. **Nothing user-visible waits on `downloading$`.** It coalesces cloud-origin applies; a user's own
-   commit repaints immediately. A failed setup still settles the indicator.
+   commit repaints immediately. A failed setup still settles the indicator. Every cloud-origin write
+   that changed a local row is announced on `applied$` once its lock hold ends; a no-op delivery is not.
 7. **No DataSource access after dispose.** Dispose awaits the drain, the access chain, and in-flight
    applies; callbacks check a disposed flag.
 8. **The device never deletes what the cloud is not known to hold.**

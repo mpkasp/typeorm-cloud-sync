@@ -6,7 +6,7 @@ import { Meta } from '../models/meta.model';
 import { storeNameOf } from '../models/store-name';
 
 import { DataSource, EntityManager, EntitySubscriberInterface, In } from 'typeorm/browser';
-import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription } from 'rxjs';
+import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subject, Subscription } from 'rxjs';
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUserSubscriber } from '../base-user.subscriber';
 import { BaseUser } from '../models/base-user.model';
@@ -68,6 +68,13 @@ export interface DeliveryStream {
 
 class UploadTimeoutError extends Error {}
 
+// Cloud-origin records written to the local database. Those saves run with entity listeners off, so
+// this is how the app learns that rows it displays have changed.
+export interface AppliedRecords {
+  recordType: typeof StoreRecord;
+  count: number;
+}
+
 export interface CloudUploadResult {
   record: StoreRecord;
   newerCloudCopy?: StoreRecord;
@@ -97,6 +104,10 @@ export abstract class CloudStore {
   public get downloading(): boolean {
     return this.downloadingSubject.getValue();
   }
+
+  // Emits after the local transaction lock is released, so a query run from a subscriber sees the rows.
+  protected readonly appliedSubject = new Subject<AppliedRecords>();
+  public readonly applied$: Observable<AppliedRecords> = this.appliedSubject.asObservable();
 
   protected privateCloudInitialized: boolean = false;
   protected localStore: SqliteStore;
@@ -142,8 +153,8 @@ export abstract class CloudStore {
   //   initialzation so that we can asynchronously set up the cloud app, sqlite store, etc..
   protected constructor(
     protected UserModel: typeof BaseUser,
-    protected publicRecords: typeof StoreRecord[],
-    protected privateRecords: typeof StoreRecord[],
+    protected publicRecords: (typeof StoreRecord)[],
+    protected privateRecords: (typeof StoreRecord)[],
     private readonly networkSource: Observable<boolean> = browserNetwork$(),
   ) {}
 
@@ -236,6 +247,7 @@ export abstract class CloudStore {
     this.detachSubscribers();
     this.unsubscribePrivateCloud();
     this.subscriptions.unsubscribe();
+    this.appliedSubject.complete();
   }
 
   private subscribeNetwork() {
@@ -391,6 +403,7 @@ export abstract class CloudStore {
       }
       try {
         const upload = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
+        let storedNewerCloudCopy = false;
         await serializeLocalTransaction(this.manager, async () => {
           // Tenant.dispose destroys the DataSource under this lock, so the check cannot go stale.
           if (!this.localStore.dataSource.isInitialized) {
@@ -404,6 +417,7 @@ export abstract class CloudStore {
             // delivery would replace the local row: store the copy here or local never equals cloud.
             if (upload.newerCloudCopy) {
               await upload.newerCloudCopy.saveWithManager(manager, { listeners: false }, false);
+              storedNewerCloudCopy = true;
               return;
             }
             await manager
@@ -415,6 +429,9 @@ export abstract class CloudStore {
               .execute();
           });
         });
+        if (storedNewerCloudCopy && !this.disposed) {
+          this.appliedSubject.next({ recordType: record.constructor as typeof StoreRecord, count: 1 });
+        }
       } catch (err) {
         if (err instanceof UploadTimeoutError) {
           console.warn('[updateCloudFromChangeLog] upload timed out, leaving the remaining changes queued', err);
@@ -521,12 +538,13 @@ export abstract class CloudStore {
     if (records.length === 0) {
       return;
     }
-    await serializeLocalTransaction(this.manager, async () => {
+    const appliedCount = await serializeLocalTransaction(this.manager, async () => {
       if (this.disposed) {
-        return;
+        return 0;
       }
+      let resolvedRecords: StoreRecord[];
       try {
-        await this.resolveRecordsLocked(recordType, records);
+        resolvedRecords = await this.resolveRecordsLocked(recordType, records);
       } catch (error) {
         stream.failed = true;
         throw error;
@@ -534,7 +552,13 @@ export abstract class CloudStore {
       if (!stream.failed) {
         await this.advanceCursorLocked(recordType, isPrivate, Math.max(...records.map((record) => record.changeId)));
       }
+      return resolvedRecords.length;
     });
+    // Every upload echoes back as a delivery that changes nothing; announcing those would make the app
+    // refresh after each of its own edits.
+    if (appliedCount > 0 && !this.disposed) {
+      this.appliedSubject.next({ recordType, count: appliedCount });
+    }
   }
 
   // Apply a page of records from the cloud. Records with a pending local change go through the

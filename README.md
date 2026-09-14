@@ -386,6 +386,8 @@ Everything is exported from the package root.
 
 - `SqliteStore` — wraps a `DataSource` and routes all persistence through its `EntityManager`.
 - `CloudStore` — abstract base defining the sync contract and reactive state.
+  `applied$` emits `AppliedRecords` (`{ recordType, count }`) after cloud-origin records are written
+  locally. Those writes run with entity listeners off, so subscribe to it to refresh anything that reads them.
 - `CloudFirebaseFirestore` — Firebase Web SDK implementation of `CloudStore`.
 
 **Multi-tenant**

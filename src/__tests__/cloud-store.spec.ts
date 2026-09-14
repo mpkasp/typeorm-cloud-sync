@@ -520,6 +520,85 @@ describe('download cursor', () => {
   });
 });
 
+describe('applied$', () => {
+  beforeEach(async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await waitFor(async () => (await changeLogCount()) === 0);
+  });
+
+  const recordApplied = () => {
+    const applied: { recordType: unknown; count: number }[] = [];
+    cloud.applied$.subscribe((event) => applied.push(event));
+    return applied;
+  };
+
+  const cloudNote = (id: string, changeId: number) =>
+    new Note({ id, text: id, changeId, createdMs: 1000, updatedMs: 1000 });
+
+  test('announces a delivery once, after its rows can be read', async () => {
+    const countsSeen: number[] = [];
+    cloud.applied$.subscribe(async () => countsSeen.push(await dataSource.getRepository(Note).count()));
+    const applied = recordApplied();
+
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('a', 1), cloudNote('b', 2), cloudNote('c', 3)]);
+    await waitFor(() => countsSeen.length === 1);
+
+    expect(applied).toEqual([{ recordType: Note, count: 3 }]);
+    expect(countsSeen).toEqual([3]);
+  });
+
+  test('a re-delivery that writes nothing is not announced', async () => {
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)]);
+    const applied = recordApplied();
+
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)]);
+
+    expect(applied).toEqual([]);
+  });
+
+  test('the drain announces a newer cloud copy it stores, and not a plain write-back', async () => {
+    const applied = recordApplied();
+    await stageOffline(() => new Note({ text: 'plain' }).save());
+    await cloud.updateCloudFromChangeLog();
+    expect(applied).toEqual([]);
+
+    const note = await stageOffline(() =>
+      new Note({ id: 'shared', text: 'mine', changeId: 5, createdMs: 1000, updatedMs: 1500 }).save(
+        { listeners: false },
+        false,
+      ),
+    );
+    await stageOffline(() => note.updateChangeLog());
+    await cloud.port.setDoc(`User/${AUTH_ID}/Note/shared`, {
+      text: 'theirs',
+      changeId: 5,
+      createdMs: 1000,
+      updatedMs: 2000,
+      isPrivate: true,
+      isDeleted: false,
+      recordChangeTimestamp: new Date(2000),
+    });
+    await cloud.port.setDoc(`User/${AUTH_ID}/Meta/Note`, { collection: 'Note', changeId: 5 });
+
+    await cloud.updateCloudFromChangeLog();
+
+    expect(applied).toEqual([{ recordType: Note, count: 1 }]);
+  });
+
+  test('nothing is announced after dispose, and the stream completes', async () => {
+    const applied = recordApplied();
+    let completed = false;
+    cloud.applied$.subscribe({ complete: () => (completed = true) });
+
+    cloud.dispose();
+    await (cloud as any).applyDelivery(Note, true, [cloudNote('a', 1)]);
+
+    expect(applied).toEqual([]);
+    expect(completed).toBe(true);
+  });
+});
+
 describe('with the ActiveRecord global bound to another database', () => {
   test('the drain uploads its own store and leaves the other database untouched', async () => {
     await seedUser();

@@ -50,8 +50,8 @@ export class CloudFirebaseFirestore extends CloudStore {
   // cloud-firebase-firestore.construction.spec.ts — keep any network touch out of this path.
   constructor(
     protected UserModel: typeof BaseUser,
-    protected publicRecords: typeof StoreRecord[],
-    protected privateRecords: typeof StoreRecord[],
+    protected publicRecords: (typeof StoreRecord)[],
+    protected privateRecords: (typeof StoreRecord)[],
     network$?: Observable<boolean>,
   ) {
     super(UserModel, publicRecords, privateRecords, network$);
@@ -372,6 +372,9 @@ export class CloudFirebaseFirestore extends CloudStore {
                   await updatedUser.saveWithManager(this.manager, { listeners: false }, false);
                 }
               });
+              if (!this.disposed) {
+                this.appliedSubject.next({ recordType: this.UserModel, count: 1 });
+              }
             } else {
               // Nothing in the cloud yet: the local record is the only copy, and the drain uploads it.
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] no cloud user document yet');

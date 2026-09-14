@@ -89,6 +89,24 @@ describe('CloudFirebaseFirestore.subscribeCloudUser()', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
+  it('announces the stored cloud user', async () => {
+    const store = makeStore();
+    (store as any).localStore = {manager: {connection: {}}};
+    const save = jest.spyOn(BaseUser.prototype, 'saveWithManager').mockImplementation(async function (this: BaseUser) {
+      return this;
+    });
+    const applied: unknown[] = [];
+    store.applied$.subscribe(event => applied.push(event));
+    const pending = subscribeCloudUser(store);
+
+    await capturedHandlers().next({exists: () => true, data: () => ({authId: 'managed-uid'}), id: 'managed-uid'});
+    await pending;
+
+    expect(save).toHaveBeenCalledWith(expect.anything(), {listeners: false}, false);
+    expect(applied).toEqual([{recordType: BaseUser, count: 1}]);
+    save.mockRestore();
+  });
+
   it('returns without subscribing when there is no local user to subscribe for', async () => {
     const store = new CloudFirebaseFirestore(BaseUser, [], []);
     (store as any).db = {};
