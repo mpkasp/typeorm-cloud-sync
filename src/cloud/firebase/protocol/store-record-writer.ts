@@ -11,6 +11,14 @@ export interface WriteOptions {
   seedChangeId?: () => Promise<number>;
 }
 
+export interface WriteResult {
+  record: VersionedRecord;
+  // Set when the write was skipped because the cloud copy is newer: that copy's document data, as read
+  // in the transaction. The caller stores it locally, since the device may already have downloaded it
+  // and no delivery would bring it in again.
+  newerCloudCopy?: Record<string, any>;
+}
+
 // The versioned write protocol, shared by the client (web SDK) and a Cloud Function (Admin SDK),
 // each over its own FirestorePort binding. A record's changeId is allocated from its collection's
 // Meta doc at the deterministic path `{metaCollectionPath}/{storeName}`, read and bumped in the same
@@ -22,7 +30,7 @@ export class StoreRecordWriter {
     private paths: PathBuilder,
   ) {}
 
-  public async updateStoreRecord(obj: VersionedRecord, opts: WriteOptions = {}): Promise<VersionedRecord> {
+  public async updateStoreRecord(obj: VersionedRecord, opts: WriteOptions = {}): Promise<WriteResult> {
     console.debug('[updateStoreRecord]', obj);
     if (obj.storeName !== 'User') {
       return this.updatePublicStoreRecord(obj, opts);
@@ -32,7 +40,7 @@ export class StoreRecordWriter {
       const user = obj;
       if (!user.authId) {
         console.warn('Trying to update user object without an auth id', user);
-        return obj;
+        return { record: obj };
       }
       console.debug('[updateStoreRecord] User Document with valid id: ', user, user?.authId);
       const userPath = this.paths.userDocument(user.authId);
@@ -41,7 +49,7 @@ export class StoreRecordWriter {
       if (!document.exists) {
         console.debug("[firestore-model] Update: document doesn't exist for this user, ", document);
         await this.port.setDoc(userPath, obj.raw());
-        return obj;
+        return { record: obj };
         // throw new Error('Document doesn\'t exist for this user');
       }
       console.debug('[updateStoreRecord] about to run transaction');
@@ -72,51 +80,45 @@ export class StoreRecordWriter {
           throw err;
         });
 
-      return obj;
+      return { record: obj };
     }
   }
 
-  public async updatePublicStoreRecord(model: VersionedRecord, opts: WriteOptions = {}): Promise<VersionedRecord> {
+  public async updatePublicStoreRecord(model: VersionedRecord, opts: WriteOptions = {}): Promise<WriteResult> {
     console.debug('[updatePublicStoreRecord]', model);
     const metaCollectionPath = this.paths.metaCollectionPath(model);
     const metaDocumentPath = this.paths.metaDocumentPath(model);
     const documentPath = this.paths.documentPath(model);
     const localChangeId = model.changeId;
     const localRecordChangeTimestamp = model.recordChangeTimestamp;
-    await this.port
-      .runTransaction(async (transaction) => {
-        const metaDoc = await transaction.get(metaDocumentPath);
-        const cloudDoc = await transaction.get(documentPath);
-        // A newer cloud copy is another writer's later edit: overwriting it would lose that edit. The
-        // record keeps its local changeId, which is below the cloud copy's, so the download applies it.
-        // Restored rather than left alone because an earlier attempt of this transaction may have set it.
-        const cloudUpdatedMs = cloudDoc.data?.updatedMs;
-        if (cloudDoc.exists && typeof cloudUpdatedMs === 'number' && cloudUpdatedMs > (model.raw().updatedMs ?? 0)) {
-          console.debug('[updatePublicStoreRecord] cloud copy is newer, not overwriting', documentPath);
-          model.changeId = localChangeId;
-          model.recordChangeTimestamp = localRecordChangeTimestamp;
-          return;
-        }
-        const currentChangeId = metaDoc.exists
-          ? metaDoc.data!.changeId
-          : await this.initialChangeId(metaCollectionPath, model.storeName, opts);
-        const changeId = currentChangeId + 1;
-        model.changeId = changeId;
-        model.recordChangeTimestamp = new Date();
-        // Need merge = true if we want to allow migrations since it uses the uid property
-        transaction.set(documentPath, model.raw(), { merge: true });
-        if (metaDoc.exists) {
-          transaction.update(metaDocumentPath, { changeId });
-        } else {
-          transaction.set(metaDocumentPath, { collection: model.storeName, changeId });
-        }
-      })
-      .catch((err) => {
-        console.error('[updatePublicStoreRecord]', documentPath, err);
-        throw err;
-      });
-
-    return model;
+    return this.port.runTransaction(async (transaction): Promise<WriteResult> => {
+      const metaDoc = await transaction.get(metaDocumentPath);
+      const cloudDoc = await transaction.get(documentPath);
+      // A newer cloud copy is another writer's later edit: overwriting it would lose that edit. It is
+      // returned instead, and the record keeps its local changeId — restored rather than left alone
+      // because an earlier attempt of this transaction may have set it.
+      const cloudUpdatedMs = cloudDoc.data?.updatedMs;
+      if (cloudDoc.exists && typeof cloudUpdatedMs === 'number' && cloudUpdatedMs > (model.raw().updatedMs ?? 0)) {
+        console.debug('[updatePublicStoreRecord] cloud copy is newer, not overwriting', documentPath);
+        model.changeId = localChangeId;
+        model.recordChangeTimestamp = localRecordChangeTimestamp;
+        return { record: model, newerCloudCopy: cloudDoc.data };
+      }
+      const currentChangeId = metaDoc.exists
+        ? metaDoc.data!.changeId
+        : await this.initialChangeId(metaCollectionPath, model.storeName, opts);
+      const changeId = currentChangeId + 1;
+      model.changeId = changeId;
+      model.recordChangeTimestamp = new Date();
+      // Need merge = true if we want to allow migrations since it uses the uid property
+      transaction.set(documentPath, model.raw(), { merge: true });
+      if (metaDoc.exists) {
+        transaction.update(metaDocumentPath, { changeId });
+      } else {
+        transaction.set(metaDocumentPath, { collection: model.storeName, changeId });
+      }
+      return { record: model };
+    });
   }
 
   // Meta docs written by earlier versions have random ids and are found by their `collection` field.

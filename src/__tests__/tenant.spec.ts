@@ -247,7 +247,7 @@ test('whenIdle gives up on a drain that never settles', async () => {
   const hung = new Promise<void>((resolve) => (release = resolve));
   jest.spyOn(tenant.cloud, 'updateStoreRecord').mockImplementation(async (record) => {
     await hung;
-    return record;
+    return { record };
   });
 
   void tenant.cloud.updateCloudFromChangeLog();

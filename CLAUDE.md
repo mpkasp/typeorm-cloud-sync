@@ -43,6 +43,9 @@ Every change must preserve these. When a change touches one, add or update a tes
 7. **No DataSource access after dispose.** Dispose awaits the drain, the access chain, and in-flight
    applies; callbacks check a disposed flag.
 8. **The device never deletes what the cloud is not known to hold.**
+9. **After a skipped upload, local equals cloud.** When the writer skips a record because the cloud copy is
+   newer, the drain stores that copy locally in the write-back transaction (listeners off, no change log).
+   The download cannot be relied on: the device may already be past that copy's `changeId`.
 
 ## Working rules
 

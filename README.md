@@ -283,8 +283,8 @@ Each `Meta` document tracks the highest `changeId` allocated for its collection.
 the record's current cloud copy, and bumps it in the same transaction, so `changeId` is strictly
 increasing and clients can resume downloads with a single `where('changeId', '>', lastSeen)` query.
 The first write to a collection creates its `Meta` document inside that transaction. An upload whose
-`updatedMs` is older than the cloud copy's is skipped: that copy is a later edit, and the download
-brings it in. A collection whose `Meta` was created at a random id by an earlier version continues
+`updatedMs` is older than the cloud copy's is skipped: that copy is a later edit, and the drain stores
+it locally in place of the change it did not upload. A collection whose `Meta` was created at a random id by an earlier version continues
 from that document's `changeId`.
 
 ---

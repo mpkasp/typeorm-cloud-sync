@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs';
-import { CloudStore } from '../cloud/cloud-store';
+import { CloudStore, CloudUploadResult } from '../cloud/cloud-store';
 import { SqliteStore } from '../sqlite-store';
 import { StoreRecord } from '../models/store-record.model';
 import { BaseUser } from '../models/base-user.model';
@@ -49,9 +49,9 @@ export class FakeCloudStore extends CloudStore {
   }
 
   // Mirrors CloudFirebaseFirestore.updateStoreRecord, including the seedChangeId callback.
-  public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
+  public async updateStoreRecord(obj: StoreRecord): Promise<CloudUploadResult> {
     this.calls.push(`update:${storeNameOf(obj)}`);
-    await this.writer.updateStoreRecord(this.asVersioned(obj), {
+    const result = await this.writer.updateStoreRecord(this.asVersioned(obj), {
       seedChangeId: () =>
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
@@ -59,7 +59,10 @@ export class FakeCloudStore extends CloudStore {
           obj.isPrivate,
         ),
     });
-    return obj;
+    return {
+      record: obj,
+      newerCloudCopy: result.newerCloudCopy && new (obj.constructor as any)({ ...result.newerCloudCopy, id: obj.id }),
+    };
   }
 
   protected deserialize(document: any): any {

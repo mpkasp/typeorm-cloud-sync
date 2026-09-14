@@ -356,6 +356,37 @@ describe('updateCloudFromChangeLog drain', () => {
     expect(await changeLogCount()).toBe(0);
   });
 
+  // The device downloaded the other device's copy (cursor past changeId 5), then edited it with a clock
+  // reading earlier than that copy's. The writer skips the upload; no delivery will bring the copy back.
+  test('stores the newer cloud copy locally when the upload is skipped for it', async () => {
+    const note = await stageOffline(() =>
+      new Note({ id: 'shared', text: 'mine', changeId: 5, createdMs: 1000, updatedMs: 1500 }).save(
+        { listeners: false },
+        false,
+      ),
+    );
+    await stageOffline(() => note.updateChangeLog());
+    const cloudCopy = {
+      text: 'theirs',
+      changeId: 5,
+      createdMs: 1000,
+      updatedMs: 2000,
+      isPrivate: true,
+      isDeleted: false,
+      recordChangeTimestamp: new Date(2000),
+    };
+    await cloud.port.setDoc(`User/${AUTH_ID}/Note/shared`, cloudCopy);
+    await cloud.port.setDoc(`User/${AUTH_ID}/Meta/Note`, { collection: 'Note', changeId: 5 });
+
+    await cloud.updateCloudFromChangeLog();
+
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/shared`)).toEqual(cloudCopy);
+    expect(cloud.port.get(`User/${AUTH_ID}/Meta/Note`)!.changeId).toBe(5);
+    const stored = await dataSource.getRepository(Note).findOneByOrFail({ id: 'shared' });
+    expect(stored).toMatchObject({ text: 'theirs', changeId: 5, updatedMs: 2000, createdMs: 1000 });
+    expect(await changeLogCount()).toBe(0);
+  });
+
   test('keeps the change-log row when the upload fails', async () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     jest.spyOn(cloud, 'updateStoreRecord').mockRejectedValue(new Error('cloud unreachable'));

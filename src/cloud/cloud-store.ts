@@ -68,6 +68,11 @@ export interface DeliveryStream {
 
 class UploadTimeoutError extends Error {}
 
+export interface CloudUploadResult {
+  record: StoreRecord;
+  newerCloudCopy?: StoreRecord;
+}
+
 export abstract class CloudStore {
   protected networkSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(isOnline());
   public network$: Observable<boolean> = this.networkSubject.asObservable();
@@ -300,8 +305,8 @@ export abstract class CloudStore {
   public abstract update(obj: StoreRecord): Promise<any>;
 
   // Logic of updating a StoreRecord in a transaction: bumps the changeId, sets record change timestamp, updates
-  // metadata table etc...
-  public abstract updateStoreRecord(obj: StoreRecord): Promise<StoreRecord>;
+  // metadata table etc... When the cloud copy is newer the write is skipped and that copy is returned.
+  public abstract updateStoreRecord(obj: StoreRecord): Promise<CloudUploadResult>;
 
   // Delete an object in the cloud
   public abstract delete(obj: StoreRecord, fromDb: boolean): Promise<any>;
@@ -385,22 +390,29 @@ export abstract class CloudStore {
         return;
       }
       try {
-        const newRecord = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
+        const upload = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
         await serializeLocalTransaction(this.manager, async () => {
           // Tenant.dispose destroys the DataSource under this lock, so the check cannot go stale.
           if (!this.localStore.dataSource.isInitialized) {
             return;
           }
           await this.manager.transaction(async (manager) => {
-            if (await this.removeChangeIfUnchanged(manager, change)) {
-              await manager
-                .createQueryBuilder()
-                .update(record.constructor as typeof StoreRecord)
-                .set({ changeId: newRecord.changeId })
-                .where('id = :id', { id: record.id })
-                .callListeners(false)
-                .execute();
+            if (!(await this.removeChangeIfUnchanged(manager, change))) {
+              return;
             }
+            // The device may have downloaded the newer copy already, with the cursor past it, so no
+            // delivery would replace the local row: store the copy here or local never equals cloud.
+            if (upload.newerCloudCopy) {
+              await upload.newerCloudCopy.saveWithManager(manager, { listeners: false }, false);
+              return;
+            }
+            await manager
+              .createQueryBuilder()
+              .update(record.constructor as typeof StoreRecord)
+              .set({ changeId: upload.record.changeId })
+              .where('id = :id', { id: record.id })
+              .callListeners(false)
+              .execute();
           });
         });
       } catch (err) {

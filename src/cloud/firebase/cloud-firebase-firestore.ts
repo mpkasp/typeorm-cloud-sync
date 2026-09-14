@@ -1,5 +1,5 @@
 // tslint:disable: no-console
-import { CloudStore, DeliveryStream } from '../cloud-store';
+import { CloudStore, CloudUploadResult, DeliveryStream } from '../cloud-store';
 import { SqliteStore } from '../../sqlite-store';
 import { StoreRecord } from '../../models/store-record.model';
 import { BaseUser } from '../../models/base-user.model';
@@ -79,14 +79,10 @@ export class CloudFirebaseFirestore extends CloudStore {
     return setDoc(docRef, obj.raw(), { merge: true });
   }
 
-  public async updateStoreRecord(obj: StoreRecord): Promise<StoreRecord> {
-    // The body of this method (the meta/changeId logic + updatePublicStoreRecord) moved verbatim
-    // into the shared StoreRecordWriter so a Cloud Function can run the same protocol. `asVersioned`
-    // writes changeId / recordChangeTimestamp back onto `obj` (live accessors), so we return the
-    // same instance. `seedChangeId` is the original inline
-    // `StoreRecord.getLatestChangeId(this.localStore.dataSource, ...)` call, now passed in as a
-    // callback — the one piece the server can't supply (it seeds 0 instead).
-    await this.writer.updateStoreRecord(this.asVersioned(obj), {
+  public async updateStoreRecord(obj: StoreRecord): Promise<CloudUploadResult> {
+    // The protocol lives in the shared StoreRecordWriter so a Cloud Function runs the same code.
+    // `asVersioned` writes changeId / recordChangeTimestamp back onto `obj` (live accessors).
+    const result = await this.writer.updateStoreRecord(this.asVersioned(obj), {
       // A single read outside any transaction, so it does not take the local transaction lock.
       seedChangeId: () =>
         StoreRecord.getLatestChangeId(
@@ -95,7 +91,12 @@ export class CloudFirebaseFirestore extends CloudStore {
           obj.isPrivate,
         ),
     });
-    return obj;
+    return {
+      record: obj,
+      newerCloudCopy:
+        result.newerCloudCopy &&
+        new (obj.constructor as any)(this.deserialize(result.newerCloudCopy, obj.id, obj.isPrivate)),
+    };
   }
 
   public async delete(obj: StoreRecord, fromDb: boolean = false) {

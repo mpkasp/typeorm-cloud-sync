@@ -131,8 +131,9 @@ describe('StoreRecordWriter — versioned records', () => {
     await w.updateStoreRecord(record({ storeName: 'MedicineLog', id: 'e1', fields: { quantity: 2, updatedMs: 2000 } }));
 
     const older = record({ storeName: 'MedicineLog', id: 'e1', fields: { quantity: 1, updatedMs: 1000 } });
-    await w.updateStoreRecord(older);
+    const result = await w.updateStoreRecord(older);
 
+    expect(result.newerCloudCopy).toMatchObject({ quantity: 2, updatedMs: 2000, changeId: 1 });
     expect(older.changeId).toBe(0);
     expect(port.get(`User/${AUTH}/MedicineLog/e1`)).toMatchObject({ quantity: 2, updatedMs: 2000, changeId: 1 });
     expect(port.get(`User/${AUTH}/Meta/MedicineLog`)!.changeId).toBe(1);
@@ -178,8 +179,9 @@ describe('StoreRecordWriter — versioned records', () => {
     await w.updateStoreRecord(record({ storeName: 'MedicineLog', id: 'e1', fields: { quantity: 1, updatedMs: 1000 } }));
 
     const newer = record({ storeName: 'MedicineLog', id: 'e1', fields: { quantity: 2, updatedMs: 2000 } });
-    await w.updateStoreRecord(newer);
+    const result = await w.updateStoreRecord(newer);
 
+    expect(result.newerCloudCopy).toBeUndefined();
     expect(newer.changeId).toBe(2);
     expect(port.get(`User/${AUTH}/MedicineLog/e1`)).toMatchObject({ quantity: 2, changeId: 2 });
   });
