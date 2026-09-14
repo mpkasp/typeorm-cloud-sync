@@ -28,6 +28,10 @@ export class PathBuilder {
     return `${this.userDocument()}/Meta`;
   }
 
+  public metaDocumentPath(obj: PathTarget): string {
+    return `${this.metaCollectionPath(obj)}/${obj.storeName}`;
+  }
+
   public documentPath(obj: PathTarget): string {
     return obj.storeName === 'User' ? this.userDocument(obj.authId) : `${this.collectionPath(obj)}/${obj.id}`;
   }

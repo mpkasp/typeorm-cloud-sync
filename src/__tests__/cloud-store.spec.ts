@@ -222,7 +222,7 @@ describe('updateCloudFromChangeLog drain', () => {
     const document = cloud.port.get(`User/${AUTH_ID}/Note/${note.id}`);
     expect(document).toMatchObject({ text: 'sync me', changeId: 2, isPrivate: true });
     // The local seed (changeId 1) is what the new Meta doc starts from, so the cloud lands on 2.
-    expect(cloud.port.get(`User/${AUTH_ID}/Meta/auto-1`)).toMatchObject({ collection: 'Note', changeId: 2 });
+    expect(cloud.port.get(`User/${AUTH_ID}/Meta/Note`)).toMatchObject({ collection: 'Note', changeId: 2 });
     const stored = await dataSource.getRepository(Note).findOneBy({ id: note.id });
     expect(stored!.changeId).toBe(2);
     expect(await changeLogCount()).toBe(0);
@@ -254,7 +254,7 @@ describe('updateCloudFromChangeLog drain', () => {
     await cloud.updateCloudFromChangeLog();
 
     expect(cloud.port.get(`Tag/${tag.id}`)).toMatchObject({ label: 'shared', isPrivate: false });
-    expect(cloud.port.get('Meta/auto-1')).toMatchObject({ collection: 'Tag' });
+    expect(cloud.port.get('Meta/Tag')).toMatchObject({ collection: 'Tag' });
     expect(await changeLogCount()).toBe(0);
   });
 

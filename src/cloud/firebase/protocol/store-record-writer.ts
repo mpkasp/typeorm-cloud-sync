@@ -7,68 +7,25 @@ export interface WriteOptions {
   // been allocated in the cloud). On the client this comes from the local store's max changeId
   // (StoreRecord.getLatestChangeId) so a collection migrating to the cloud doesn't restart at 0; on
   // the server it is simply 0 (the Meta doc is only absent when no client has ever synced the
-  // collection, so there is nothing to clobber). Replaces the original inline getLatestChangeId call.
+  // collection, so there is nothing to clobber).
   seedChangeId?: () => Promise<number>;
 }
 
-// The versioned write protocol, moved out of CloudFirebaseFirestore so the client (web SDK) and a
-// Cloud Function (Admin SDK) run the SAME code over their own FirestorePort binding. This is a
-// behavior-preserving lift of the original updateStoreRecord + updatePublicStoreRecord: the ONLY
-// changes are the ones needed to cross the SDK seam —
-//   - obj/model are a VersionedRecord view instead of a StoreRecord (obj.raw(), obj.storeName,
-//     obj.authId instead of storeNameOf(obj) / (obj as BaseUser).authId);
-//   - web-SDK calls become port calls: getDocs(query(...)) -> port.queryMeta(); doc()/DocumentReference
-//     -> string paths; snapshot.empty/.docs/.data()/.ref -> array length/[]/.data/.path;
-//     runTransaction(this.db, ...) -> port.runTransaction(...);
-//   - the newId+setDoc(doc(this.db, metaCollection, newId)) meta-create uses port.newDocPath();
-//   - latestChangeId comes from opts.seedChangeId() instead of StoreRecord.getLatestChangeId().
+// The versioned write protocol, shared by the client (web SDK) and a Cloud Function (Admin SDK),
+// each over its own FirestorePort binding. A record's changeId is allocated from its collection's
+// Meta doc at the deterministic path `{metaCollectionPath}/{storeName}`, read and bumped in the same
+// transaction as the record write, so concurrent writers — including two creating the first Meta —
+// conflict and retry instead of allocating the same changeId.
 export class StoreRecordWriter {
-  constructor(private port: FirestorePort, private paths: PathBuilder) {}
+  constructor(
+    private port: FirestorePort,
+    private paths: PathBuilder,
+  ) {}
 
   public async updateStoreRecord(obj: VersionedRecord, opts: WriteOptions = {}): Promise<VersionedRecord> {
     console.debug('[updateStoreRecord]', obj);
-    const modelName = obj.storeName;
-    if (modelName !== 'User') {
-      const collectionPath = this.paths.collectionPath(obj);
-      const metaCollection = this.paths.metaCollectionPath(obj);
-      console.debug('[updateStoreRecord] Object other than "User".', collectionPath, metaCollection);
-
-      const metaDocs = await this.port.queryMeta(metaCollection, modelName);
-      console.debug('[updateStoreRecord] got meta snapshot', metaDocs);
-      if (metaDocs.length === 0) {
-        console.debug('[updateStoreRecord] getting latest changeId');
-        const latestChangeId = opts.seedChangeId ? await opts.seedChangeId() : 0;
-        console.debug('[updateStoreRecord] change id doesnt exist, latest:', latestChangeId);
-
-        const metaData = {
-          collection: modelName,
-          changeId: latestChangeId,
-          // size: 0,
-        };
-        const metaPath = this.port.newDocPath(metaCollection);
-        await this.port.setDoc(metaPath, metaData);
-        // console.log('[updateStoreRecord] about to update public store record');
-        return this.updatePublicStoreRecord(obj, metaPath, collectionPath);
-      }
-
-      let metaDoc = metaDocs[0];
-      console.debug('[updateStoreRecord] got metaDoc', metaDocs, metaDoc);
-      if (metaDocs.length > 1) {
-        metaDocs.slice(1).forEach((doc) => {
-          console.warn('[updateStoreRecord] found more than one meta doc, comparing docs', metaDoc.path, metaDoc.data, doc.path, doc.data, metaDocs);
-          if (metaDoc.data!.changeId < doc.data!.changeId) {
-            console.debug('[updateStoreRecord] DELETING REF', metaDoc.path, metaDoc.data);
-            this.port.deleteDoc(metaDoc.path);
-            metaDoc = doc;
-          } else {
-            console.debug('[updateStoreRecord] DELETING REF', doc.path, doc.data);
-            this.port.deleteDoc(doc.path);
-          }
-        });
-      }
-
-      const metaDocPath = metaDoc.path;
-      return this.updatePublicStoreRecord(obj, metaDocPath, collectionPath);
+    if (obj.storeName !== 'User') {
+      return this.updatePublicStoreRecord(obj, opts);
     } else {
       // console.log('[updateStoreRecord] User');
       console.debug('[updateStoreRecord] User Document: ', obj);
@@ -88,60 +45,89 @@ export class StoreRecordWriter {
         // throw new Error('Document doesn\'t exist for this user');
       }
       console.debug('[updateStoreRecord] about to run transaction');
-      await this.port.runTransaction((transaction) =>
-        transaction.get(userPath).then((userDoc) => {
-          console.debug('[updateStoreRecord, firestore-model] updating user', document.data, userDoc, userDoc.data, obj);
-          let changeId = 0;
-          if (userDoc.exists) {
-            changeId = userDoc.data!.changeId + 1;
-            obj.changeId = changeId;
-            // set vs update: The set call on the other hand, will create or update the document as needed.
-            transaction.set(userPath, obj.raw(), { merge: true });
-          } else {
-            throw Error('Document does not exist!');
-          }
-          return obj;
-        }),
-      ).catch((err) => {
-        console.warn(err);
-        throw err;
-      });
+      await this.port
+        .runTransaction((transaction) =>
+          transaction.get(userPath).then((userDoc) => {
+            console.debug(
+              '[updateStoreRecord, firestore-model] updating user',
+              document.data,
+              userDoc,
+              userDoc.data,
+              obj,
+            );
+            let changeId = 0;
+            if (userDoc.exists) {
+              changeId = userDoc.data!.changeId + 1;
+              obj.changeId = changeId;
+              // set vs update: The set call on the other hand, will create or update the document as needed.
+              transaction.set(userPath, obj.raw(), { merge: true });
+            } else {
+              throw Error('Document does not exist!');
+            }
+            return obj;
+          }),
+        )
+        .catch((err) => {
+          console.warn(err);
+          throw err;
+        });
 
       return obj;
     }
   }
 
-  public async updatePublicStoreRecord(
-    model: VersionedRecord,
-    metaDocPath: string,
-    collectionPath: string,
-  ): Promise<VersionedRecord> {
+  public async updatePublicStoreRecord(model: VersionedRecord, opts: WriteOptions = {}): Promise<VersionedRecord> {
     console.debug('[updatePublicStoreRecord]', model);
-    await this.port.runTransaction((transaction) =>
-      transaction.get(metaDocPath).then((metaDoc) => {
-        let changeId = 0;
-        if (metaDoc.exists) {
-          // console.log('[updatePublicStoreRecord] metaDoc exists', metaDoc.data);
-          changeId = metaDoc.data!.changeId + 1;
-          model.changeId = changeId;
-          model.recordChangeTimestamp = new Date();
-          const docPath = collectionPath + '/' + model.id;
-          // Need merge = true if we want to allow migrations since it uses the uid property
-          transaction.set(docPath, model.raw(), { merge: true });
-          transaction.update(metaDocPath, { changeId });
-        } else {
-          throw Error('Document does not exist!');
+    const metaCollectionPath = this.paths.metaCollectionPath(model);
+    const metaDocumentPath = this.paths.metaDocumentPath(model);
+    const documentPath = this.paths.documentPath(model);
+    const localChangeId = model.changeId;
+    const localRecordChangeTimestamp = model.recordChangeTimestamp;
+    await this.port
+      .runTransaction(async (transaction) => {
+        const metaDoc = await transaction.get(metaDocumentPath);
+        const cloudDoc = await transaction.get(documentPath);
+        // A newer cloud copy is another writer's later edit: overwriting it would lose that edit. The
+        // record keeps its local changeId, which is below the cloud copy's, so the download applies it.
+        // Restored rather than left alone because an earlier attempt of this transaction may have set it.
+        const cloudUpdatedMs = cloudDoc.data?.updatedMs;
+        if (cloudDoc.exists && typeof cloudUpdatedMs === 'number' && cloudUpdatedMs > (model.raw().updatedMs ?? 0)) {
+          console.debug('[updatePublicStoreRecord] cloud copy is newer, not overwriting', documentPath);
+          model.changeId = localChangeId;
+          model.recordChangeTimestamp = localRecordChangeTimestamp;
+          return;
         }
-        return model;
-      }),
-    ).catch((err) => {
-      console.error(err);
-      console.warn(
-        "Make sure the collection is created. Our rules don't allow creation of collections, even for admins!",
-      );
-      throw err;
-    });
+        const currentChangeId = metaDoc.exists
+          ? metaDoc.data!.changeId
+          : await this.initialChangeId(metaCollectionPath, model.storeName, opts);
+        const changeId = currentChangeId + 1;
+        model.changeId = changeId;
+        model.recordChangeTimestamp = new Date();
+        // Need merge = true if we want to allow migrations since it uses the uid property
+        transaction.set(documentPath, model.raw(), { merge: true });
+        if (metaDoc.exists) {
+          transaction.update(metaDocumentPath, { changeId });
+        } else {
+          transaction.set(metaDocumentPath, { collection: model.storeName, changeId });
+        }
+      })
+      .catch((err) => {
+        console.error('[updatePublicStoreRecord]', documentPath, err);
+        throw err;
+      });
 
     return model;
+  }
+
+  // Meta docs written by earlier versions have random ids and are found by their `collection` field.
+  // When one exists, the deterministic doc continues from the highest of them instead of the seed.
+  // The query is not part of the transaction's read set; the transactional read of the absent
+  // deterministic doc is what makes concurrent creators conflict.
+  private async initialChangeId(metaCollectionPath: string, collectionName: string, opts: WriteOptions) {
+    const legacyMetaDocs = await this.port.queryMeta(metaCollectionPath, collectionName);
+    if (legacyMetaDocs.length > 0) {
+      return Math.max(...legacyMetaDocs.map((legacyMetaDoc) => legacyMetaDoc.data!.changeId));
+    }
+    return opts.seedChangeId ? opts.seedChangeId() : 0;
   }
 }

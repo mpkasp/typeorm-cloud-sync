@@ -275,13 +275,17 @@ How the Firestore backend (`CloudFirebaseFirestore`) lays out documents:
 | ----------------- | --------------------------------- |
 | User document     | `User/{authId}`                   |
 | Private records   | `User/{authId}/{StoreName}/{id}`  |
-| Private meta      | `User/{authId}/Meta`              |
+| Private meta      | `User/{authId}/Meta/{StoreName}`  |
 | Public records    | `{StoreName}/{id}`                |
-| Public meta       | `Meta`                            |
+| Public meta       | `Meta/{StoreName}`                |
 
-Each `Meta` document tracks the highest `changeId` allocated for its collection. Writes bump it
-transactionally so `changeId` is strictly increasing and clients can resume downloads with a single
-`where('changeId', '>', lastSeen)` query.
+Each `Meta` document tracks the highest `changeId` allocated for its collection. A write reads it and
+the record's current cloud copy, and bumps it in the same transaction, so `changeId` is strictly
+increasing and clients can resume downloads with a single `where('changeId', '>', lastSeen)` query.
+The first write to a collection creates its `Meta` document inside that transaction. An upload whose
+`updatedMs` is older than the cloud copy's is skipped: that copy is a later edit, and the download
+brings it in. A collection whose `Meta` was created at a random id by an earlier version continues
+from that document's `changeId`.
 
 ---
 
@@ -333,7 +337,7 @@ against an SDK-agnostic `FirestorePort`:
 import { StoreRecordWriter, PathBuilder, FirestorePort } from 'typeorm-cloud-sync';
 
 class AdminFirestorePort implements FirestorePort {
-  // implement getDoc / setDoc / deleteDoc / queryMeta / newDocPath / runTransaction
+  // implement getDoc / setDoc / deleteDoc / queryMeta / runTransaction
   // using firebase-admin
 }
 

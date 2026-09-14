@@ -1,15 +1,27 @@
 import { DocSnap, FirestorePort, WriteTxn } from '../firestore-port';
 
+const MAX_TRANSACTION_ATTEMPTS = 5;
+
 // In-memory FirestorePort for unit-testing the write protocol without a Firebase emulator.
-// Documents are a flat Map keyed by full path. runTransaction just runs the callback (tests are
-// single-threaded, so there is no contention to model); reads see the current map state.
+// Documents are a flat Map keyed by full path. runTransaction models Firestore's optimistic
+// concurrency: writes are buffered until the callback resolves, and the commit is rejected and the
+// callback retried when any document it read has been written since.
 export class FakeFirestorePort implements FirestorePort {
   readonly docs = new Map<string, Record<string, any>>();
-  private seq = 0;
+  private readonly versions = new Map<string, number>();
 
   private snap(path: string): DocSnap {
     const data = this.docs.get(path);
     return { exists: data !== undefined, data: data ? { ...data } : undefined, path };
+  }
+
+  private write(path: string, data: Record<string, any> | undefined) {
+    if (data === undefined) {
+      this.docs.delete(path);
+    } else {
+      this.docs.set(path, data);
+    }
+    this.versions.set(path, (this.versions.get(path) ?? 0) + 1);
   }
 
   async getDoc(path: string): Promise<DocSnap> {
@@ -17,12 +29,12 @@ export class FakeFirestorePort implements FirestorePort {
   }
 
   async setDoc(path: string, data: Record<string, any>, opts?: { merge?: boolean }): Promise<void> {
-    const prev = opts?.merge ? this.docs.get(path) ?? {} : {};
-    this.docs.set(path, { ...prev, ...data });
+    const previous = opts?.merge ? (this.docs.get(path) ?? {}) : {};
+    this.write(path, { ...previous, ...data });
   }
 
   async deleteDoc(path: string): Promise<void> {
-    this.docs.delete(path);
+    this.write(path, undefined);
   }
 
   async queryMeta(metaCollectionPath: string, collectionName: string): Promise<DocSnap[]> {
@@ -37,25 +49,38 @@ export class FakeFirestorePort implements FirestorePort {
     return out;
   }
 
-  newDocPath(collectionPath: string): string {
-    return `${collectionPath}/auto-${++this.seq}`;
-  }
-
   async runTransaction<T>(fn: (txn: WriteTxn) => Promise<T>): Promise<T> {
-    const txn: WriteTxn = {
-      get: (path) => this.getDoc(path),
-      set: (path, data, opts) => {
-        void this.setDoc(path, data, opts);
-      },
-      update: (path, patch) => {
-        const prev = this.docs.get(path);
-        if (prev === undefined) {
-          throw new Error(`update on missing doc: ${path}`);
-        }
-        this.docs.set(path, { ...prev, ...patch });
-      },
-    };
-    return fn(txn);
+    for (let attempt = 1; ; attempt++) {
+      const readVersions = new Map<string, number>();
+      const writes: (() => void)[] = [];
+      const txn: WriteTxn = {
+        get: async (path) => {
+          readVersions.set(path, this.versions.get(path) ?? 0);
+          return this.snap(path);
+        },
+        set: (path, data, opts) => {
+          writes.push(() => void this.setDoc(path, data, opts));
+        },
+        update: (path, patch) => {
+          writes.push(() => {
+            const previous = this.docs.get(path);
+            if (previous === undefined) {
+              throw new Error(`update on missing doc: ${path}`);
+            }
+            this.write(path, { ...previous, ...patch });
+          });
+        },
+      };
+      const result = await fn(txn);
+      const conflicted = [...readVersions].some(([path, version]) => (this.versions.get(path) ?? 0) !== version);
+      if (!conflicted) {
+        writes.forEach((applyWrite) => applyWrite());
+        return result;
+      }
+      if (attempt === MAX_TRANSACTION_ATTEMPTS) {
+        throw new Error('transaction contention: too many attempts');
+      }
+    }
   }
 
   // Test helpers

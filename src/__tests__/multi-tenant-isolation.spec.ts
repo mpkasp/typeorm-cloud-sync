@@ -149,10 +149,10 @@ test('concurrent drains do not cross-write', async () => {
   await Promise.all([a.cloud.updateCloudFromChangeLog(), b.cloud.updateCloudFromChangeLog()]);
 
   expect(portOf(a).paths().sort()).toEqual(
-    [`User/${AUTH_A}/Meta/auto-1`, ...aNotes.map((n) => `User/${AUTH_A}/Note/${n.id}`)].sort(),
+    [`User/${AUTH_A}/Meta/Note`, ...aNotes.map((n) => `User/${AUTH_A}/Note/${n.id}`)].sort(),
   );
   expect(portOf(b).paths().sort()).toEqual(
-    [`User/${AUTH_B}/Meta/auto-1`, ...bNotes.map((n) => `User/${AUTH_B}/Note/${n.id}`)].sort(),
+    [`User/${AUTH_B}/Meta/Note`, ...bNotes.map((n) => `User/${AUTH_B}/Note/${n.id}`)].sort(),
   );
   await expect(changeLogs(a.localStore.dataSource).count()).resolves.toBe(0);
   await expect(changeLogs(b.localStore.dataSource).count()).resolves.toBe(0);

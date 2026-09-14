@@ -9,8 +9,8 @@
 export interface DocSnap {
   exists: boolean;
   data?: Record<string, any>;
-  // Full path of the document this snapshot came from. Needed so the caller can act on a doc it
-  // discovered via a query (e.g. delete a duplicate Meta doc) without holding an SDK ref.
+  // Full path of the document this snapshot came from, so a doc discovered via a query can be
+  // addressed without holding an SDK ref.
   path: string;
 }
 
@@ -27,9 +27,9 @@ export interface FirestorePort {
   setDoc(path: string, data: Record<string, any>, opts?: { merge?: boolean }): Promise<void>;
   deleteDoc(path: string): Promise<void>;
   // Return the Meta doc(s) under `metaCollectionPath` whose `collection` field === `collectionName`.
+  // Meta docs written before the deterministic `{metaCollectionPath}/{collectionName}` path have
+  // random ids and are only reachable this way.
   queryMeta(metaCollectionPath: string, collectionName: string): Promise<DocSnap[]>;
-  // Allocate a fresh (not-yet-written) document path within a collection, for a new Meta doc.
-  newDocPath(collectionPath: string): string;
   runTransaction<T>(fn: (txn: WriteTxn) => Promise<T>): Promise<T>;
 }
 

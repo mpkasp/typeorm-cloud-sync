@@ -39,10 +39,6 @@ export class WebFirestorePort implements FirestorePort {
     return snap.docs.map((d) => ({ exists: true, data: d.data(), path: d.ref.path }));
   }
 
-  newDocPath(collectionPath: string): string {
-    return doc(collection(this.db, collectionPath)).path;
-  }
-
   runTransaction<T>(fn: (txn: WriteTxn) => Promise<T>): Promise<T> {
     return runTransaction(this.db, (t) => {
       const txn: WriteTxn = {
