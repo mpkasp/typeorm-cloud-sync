@@ -221,6 +221,11 @@ deletes a row only if its `version` is still the one it read — an edit made wh
 uploading stays queued for the next drain. Unsent rows survive restarts, which is what makes offline
 edits durable.
 
+A drain runs on every commit that queues a change, when the network comes back, and when a download
+settles (including the private cloud finishing its setup). Call `CloudStore.drain()` from your app's
+resume handler to cover the last trigger. Each upload has a timeout (15 s); an upload that fails or
+times out leaves its row queued and the drain moves on to the next row.
+
 Add `StoreChangeLog` to your `DataSource` entity list. A database created before `version` existed
 needs the exported `AddStoreChangeLogVersion1789396900000` migration unless it runs with
 `synchronize: true`.
@@ -411,11 +416,11 @@ npm install /path/to/typeorm-cloud-sync-<version>.tgz
 
 ## Limitations & known issues
 
-- **Concurrent SQLite writes are not fully serialized.** Setup serializes Firestore subscriber
-  creation, but concurrent writes arriving from the cloud can still collide when resolving records.
-- **`subscribeRecord` re-subscription can hang.** A resubscribe during the change-log drain has a
-  standing `// TODO: This never seems to resolve`; `whenIdle()` is bounded (5s) specifically so this
-  cannot block `Tenant.dispose()` indefinitely.
+- **Only the library's own transactions are serialized.** sqljs and Capacitor share one query runner
+  per DataSource, so overlapping transactions nest. `saveWithManager`, `saveAllWithManager`, the drain
+  and cloud applies run one at a time per DataSource; an app transaction that writes directly should
+  go through `serializeLocalTransaction(manager, work)` too, or pass its transaction manager on to
+  `saveWithManager`.
 - Requires the `typeorm/browser` build and is designed around Capacitor SQLite; it is not aimed at
   server-side Node TypeORM drivers.
 

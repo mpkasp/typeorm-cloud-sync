@@ -8,6 +8,7 @@ import { BehaviorSubject, fromEvent, mapTo, merge, Observable, of, Subscription 
 import { StoreChangeLogSubscriber } from '../store-change-log.subscriber';
 import { BaseUserSubscriber } from '../base-user.subscriber';
 import { BaseUser } from '../models/base-user.model';
+import { serializeLocalTransaction } from '../local-transaction-lock';
 
 // Each store needs CRUD
 // A store needs to handle private & public data
@@ -90,15 +91,8 @@ export abstract class CloudStore {
   private lastUser: BaseUser | null = null;
   private updatingCloudFromChangeLog: boolean = false;
   private queueUpdateCloudFromChangeLog: boolean = false;
-  // A one-at-a-time queue for cloud-origin DATABASE access — reads and writes alike. The initial
-  // catch-up fetches every collection in parallel (see the adapter's subscribePrivateCloud/
-  // subscribePublicCloud), but the local DataSource is a single connection that cannot service
-  // overlapping operations: two concurrent calls — a save racing another save, or a getLatestChangeId
-  // read racing a save — corrupt the connection and surface as "Cannot read properties of undefined
-  // (reading 'query')". So every local DB touch on a cloud path funnels through here; the network round
-  // trips, which are the real cost, still overlap outside it. Chained so a failed op does not wedge the
-  // queue.
-  private dbAccessChain: Promise<unknown> = Promise.resolve();
+  // An upload that has not settled by then is abandoned for this drain; its change-log row stays queued.
+  protected uploadTimeoutMs: number = 15_000;
 
   // Hold the downloading indicator up for the duration of `work`. Nests: only the outermost pair emits.
   protected async trackDownload<T>(work: () => Promise<T>): Promise<T> {
@@ -186,8 +180,7 @@ export abstract class CloudStore {
   }
 
   // Resolves once no drain is in flight, so a caller can tear down the DataSource without pulling
-  // it out from under one. Bounded: a cloud call that never settles (see the subscribeRecord TODO
-  // in updateCloudFromChangeLog) must not be able to block disposal forever.
+  // it out from under one. Bounded, so a drain stuck on a slow cloud call cannot block disposal forever.
   public async whenIdle(timeoutMs: number = 5000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (this.drainInFlight) {
@@ -215,16 +208,23 @@ export abstract class CloudStore {
   private subscribeNetwork() {
     // Forwarding values instead of subscribing the subject itself keeps a completing source
     // (the off-browser default) from completing network$.
-    this.subscriptions.add(this.networkSource.subscribe((online) => this.networkSubject.next(online)));
-    // Fire-and-forget with its own catch: an unhandled rejection here (a drain racing a disposed
-    // tenant's destroyed DataSource, say) would otherwise take down the process.
     this.subscriptions.add(
-      this.downloading$.subscribe(() => {
-        void this.updateCloudFromChangeLog().catch((e) =>
-          console.warn('[CloudStore] background cloud push failed', e),
-        );
+      this.networkSource.subscribe((online) => {
+        this.networkSubject.next(online);
+        if (online) {
+          this.drainInBackground();
+        }
       }),
     );
+    // Also fires when the private cloud finishes initializing: privateCloudInitialized flips inside
+    // trackDownload, so the indicator's return to false follows it.
+    this.subscriptions.add(this.downloading$.subscribe(() => this.drainInBackground()));
+  }
+
+  // Fire-and-forget with its own catch: an unhandled rejection here (a drain racing a disposed
+  // tenant's destroyed DataSource, say) would otherwise take down the process.
+  private drainInBackground() {
+    void this.updateCloudFromChangeLog().catch((e) => console.warn('[CloudStore] background cloud push failed', e));
   }
 
   private subscribeLocalUser() {
@@ -287,95 +287,99 @@ export abstract class CloudStore {
 
   protected abstract unsubscribePrivateCloud(): any;
 
-  protected abstract subscribeRecord(recordName: typeof StoreRecord, isPrivate: boolean): Promise<any>;
-
-  protected abstract unsubscribeRecord(recordName: typeof StoreRecord): any;
-
   // No reason to unsubscribe from public cloud
 
   // *
   // Sync functions
   // *
-  // Update the cloud with any local changes stored in the change log - we don't want to call this until
-  // TODO: This could be a database write error failure point - if we receive multiple changes in a row from the cloud
-  //   the local DB may get 2 updates in a row and collide. To fix this we can consider populating a queue to update the DB
-  public async updateCloudFromChangeLog() {
-    if (!this.networkSubject.getValue()) {
-      console.debug('[updateCloudFromChangeLog] No network, not updating cloud.');
+
+  // Upload every queued local change. Triggered on commit, network up, download settled (which includes
+  // private cloud initialized) and by the app on resume. A call that lands while a drain is running
+  // queues another pass and resolves when the running drain, including that pass, finishes.
+  public drain(): Promise<void> {
+    return this.updateCloudFromChangeLog();
+  }
+
+  public async updateCloudFromChangeLog(): Promise<void> {
+    if (!this.canDrain()) {
       return;
     }
-
-    // Don't updateCloud until cloud subscriptions are set up and we finish downloading
-    if (!this.privateCloudInitialized) {
-      console.debug('[updateCloudFromChangeLog] Subscriptions not yet initialized, not updating cloud.');
-      return;
-    }
-
-    if (this.downloading) {
-      console.debug('[updateCloudFromChangeLog] Still downloading, not updating cloud.');
-      return;
-    }
-
     if (this.updatingCloudFromChangeLog) {
       console.debug('[updateCloudFromChangeLog] Still updating previous entry, queuing to run again.');
       this.queueUpdateCloudFromChangeLog = true;
-      return;
+      return this.drainInFlight ?? undefined;
     }
 
     this.updatingCloudFromChangeLog = true;
-    this.queueUpdateCloudFromChangeLog = false;
     let drainFinished: () => void = () => undefined;
     this.drainInFlight = new Promise<void>((resolve) => (drainFinished = resolve));
     try {
-      const changes = await this.manager.getRepository(StoreChangeLog).find();
-      // console.log(`[updateCloudFromChangeLog] Changes to update: ${changes.length}`);
-      for (const change of changes) {
-        console.debug('[updateCloudFromChangeLog], ', change);
-        const record = await change.getRecordWithManager(this.manager);
-        console.debug('[updateCloudFromChangeLog] record: ', record);
-        if (record != null) {
-          try {
-            console.debug('[updateCloudFromChangeLog] stopping subscription');
-            this.unsubscribeRecord(record.constructor as typeof StoreRecord);
-
-            console.debug('[updateCloudFromChangeLog] update store record');
-            const newRecord = await this.updateStoreRecord(record);
-
-            console.debug('[updateCloudFromChangeLog] done, now remove change and write back changeId');
-            await this.manager.transaction(async (manager) => {
-              if (await this.removeChangeIfUnchanged(manager, change)) {
-                await manager
-                  .createQueryBuilder()
-                  .update(record.constructor as typeof StoreRecord)
-                  .set({ changeId: newRecord.changeId })
-                  .where('id = :id', { id: record.id })
-                  .callListeners(false)
-                  .execute();
-              }
-            });
-
-            console.debug('[updateCloudFromChangeLog] starting subscription');
-            await this.subscribeRecord(record.constructor as typeof StoreRecord, record.isPrivate); // TODO: This never seems to resolve
-
-            console.debug('[updateCloudFromChangeLog] done removing change');
-          } catch (err) {
-            console.warn(err);
-          }
-        } else {
-          console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
-          await this.removeChangeIfUnchanged(this.manager, change);
-        }
-      }
+      do {
+        this.queueUpdateCloudFromChangeLog = false;
+        await this.drainChangeLogOnce();
+      } while (this.queueUpdateCloudFromChangeLog && this.canDrain());
     } finally {
       this.drainInFlight = null;
       drainFinished();
       this.updatingCloudFromChangeLog = false;
     }
+  }
 
-    if (this.queueUpdateCloudFromChangeLog) {
-      void this.updateCloudFromChangeLog().catch((e) =>
-        console.warn('[updateCloudFromChangeLog] queued cloud push failed', e),
-      );
+  private canDrain(): boolean {
+    if (!this.networkSubject.getValue()) {
+      console.debug('[updateCloudFromChangeLog] No network, not updating cloud.');
+      return false;
+    }
+    if (!this.privateCloudInitialized) {
+      console.debug('[updateCloudFromChangeLog] Subscriptions not yet initialized, not updating cloud.');
+      return false;
+    }
+    if (this.downloading) {
+      console.debug('[updateCloudFromChangeLog] Still downloading, not updating cloud.');
+      return false;
+    }
+    return true;
+  }
+
+  private async drainChangeLogOnce() {
+    const changes = await this.manager.getRepository(StoreChangeLog).find();
+    for (const change of changes) {
+      const record = await change.getRecordWithManager(this.manager);
+      if (record == null) {
+        console.debug('[updateCloudFromChangeLog] Local record not found, deleting change');
+        await serializeLocalTransaction(this.manager, () => this.removeChangeIfUnchanged(this.manager, change));
+        continue;
+      }
+      try {
+        const newRecord = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
+        await serializeLocalTransaction(this.manager, () =>
+          this.manager.transaction(async (manager) => {
+            if (await this.removeChangeIfUnchanged(manager, change)) {
+              await manager
+                .createQueryBuilder()
+                .update(record.constructor as typeof StoreRecord)
+                .set({ changeId: newRecord.changeId })
+                .where('id = :id', { id: record.id })
+                .callListeners(false)
+                .execute();
+            }
+          }),
+        );
+      } catch (err) {
+        console.warn('[updateCloudFromChangeLog] upload failed, leaving the change queued', err);
+      }
+    }
+  }
+
+  private async withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: any;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([work, timeout]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -397,25 +401,11 @@ export abstract class CloudStore {
   // and they are written in a single chunked, transactional bulk save instead of one round-trip each.
   // On an initial login the change log is empty, so the whole page takes the bulk path — the
   // difference between ~2 writes and ~1000 read/write round-trips for a 500-record page.
-  // Serialize a cloud-origin local-database operation (read or write) onto one queue, so parallel
-  // per-collection catch-up cannot issue overlapping work on the single DataSource connection. Runs
-  // `work` after whatever is already queued, whether that settled or threw, and never lets a rejection
-  // break the chain for the next caller. Callers must not nest a serializeDbAccess inside another (the
-  // inner would await the outer through the shared chain and deadlock).
-  protected serializeDbAccess<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.dbAccessChain.then(work, work);
-    this.dbAccessChain = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  }
-
   protected async resolveRecords(recordType: typeof StoreRecord, objs: StoreRecord[]) {
     if (objs.length === 0) {
       return [];
     }
-    return this.serializeDbAccess(() => this.resolveRecordsLocked(recordType, objs));
+    return serializeLocalTransaction(this.manager, () => this.resolveRecordsLocked(recordType, objs));
   }
 
   private async resolveRecordsLocked(recordType: typeof StoreRecord, objs: StoreRecord[]) {

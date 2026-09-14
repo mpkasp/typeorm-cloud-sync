@@ -113,6 +113,15 @@ describe('StoreRecord.updateChangeLog', () => {
     await expect(dataSource.getRepository(Note).findOneByOrFail({ id: note.id })).resolves.toMatchObject({ text: 'x' });
   });
 
+  test('a save handed a transaction manager runs inside that transaction instead of waiting for it', async () => {
+    const note = await dataSource.manager.transaction((transactionManager) =>
+      new Note({ text: 'nested' }).saveWithManager(transactionManager),
+    );
+
+    await expect(dataSource.getRepository(Note).findOneByOrFail({ id: note.id })).resolves.toMatchObject({ text: 'nested' });
+    await expect(changeLogs(dataSource).count()).resolves.toBe(1);
+  });
+
   test('separates records that share an id across stores', async () => {
     const note = await new Note({ text: 'x' }).save({}, false);
     const tag = await new Tag({ id: note.id, label: 'y' }).save({}, false);

@@ -240,12 +240,12 @@ describe('updateCloudFromChangeLog drain', () => {
     expect(await changeLogCount()).toBe(0);
   });
 
-  test('brackets each upload with unsubscribe/subscribe of that record type', async () => {
+  test('uploads without touching the cloud listeners', async () => {
     await stageOffline(() => new Note({ text: 'sync me' }).save());
 
     await cloud.updateCloudFromChangeLog();
 
-    expect(cloud.calls).toEqual(['unsubscribe:Note', 'update:Note', 'subscribe:Note']);
+    expect(cloud.calls).toEqual(['update:Note']);
   });
 
   test('writes a public record outside the user document', async () => {
@@ -271,13 +271,32 @@ describe('updateCloudFromChangeLog drain', () => {
   });
 
   test('drops a change-log row whose record no longer exists', async () => {
-    const note = await stageOffline(() => new Note({ text: 'doomed' }).save());
-    await note.remove();
+    await stageOffline(async () => {
+      const note = await new Note({ text: 'doomed' }).save();
+      await note.remove();
+    });
 
     await cloud.updateCloudFromChangeLog();
 
     expect(cloud.calls).toEqual([]);
     expect(await changeLogCount()).toBe(0);
+  });
+
+  test('an upload that never settles does not stop the next row from uploading', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    (cloud as any).uploadTimeoutMs = 50;
+    const stuck = await stageOffline(() => new Note({ text: 'stuck' }).save());
+    const upload = cloud.updateStoreRecord.bind(cloud);
+    jest
+      .spyOn(cloud, 'updateStoreRecord')
+      .mockImplementation((record) => (record.id === stuck.id ? new Promise(() => undefined) : upload(record)));
+    const next = await stageOffline(() => new Note({ text: 'next' }).save());
+
+    await cloud.updateCloudFromChangeLog();
+
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${next.id}`)).toMatchObject({ text: 'next' });
+    expect(cloud.port.get(`User/${AUTH_ID}/Note/${stuck.id}`)).toBeUndefined();
+    expect(await changeLogCount()).toBe(1);
   });
 
   test('keeps the change-log row when the upload fails', async () => {
@@ -399,7 +418,8 @@ describe('with the ActiveRecord global bound to another database', () => {
   test('resolveRecord reads the local copy from its own store', async () => {
     await seedUser();
     await cloud.initialize(sqliteStore);
-    const note = await stageOffline(() => sqliteStore.saveRecord(new Note({ text: 'local edit' })));
+    network.next(false);
+    const note = await sqliteStore.saveRecord(new Note({ text: 'local edit' }));
     await stealActiveRecordBinding();
     const resolve = jest.spyOn(sqliteStore, 'resolve');
 

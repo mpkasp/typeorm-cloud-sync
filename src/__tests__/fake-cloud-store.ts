@@ -83,14 +83,6 @@ export class FakeCloudStore extends CloudStore {
     this.calls.push('unsubscribePrivateCloud');
   }
 
-  protected async subscribeRecord(recordName: typeof StoreRecord, isPrivate: boolean): Promise<any> {
-    this.calls.push(`subscribe:${storeNameOf(recordName)}`);
-  }
-
-  protected unsubscribeRecord(recordName: typeof StoreRecord): any {
-    this.calls.push(`unsubscribe:${storeNameOf(recordName)}`);
-  }
-
   private target(obj: StoreRecord) {
     return {
       storeName: storeNameOf(obj),

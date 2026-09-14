@@ -14,6 +14,7 @@ import { StoreChangeLog } from './store-change-log.model';
 import {EntityTarget} from 'typeorm/browser';
 import { storeNameOf } from './store-name';
 import { activeRecordManager } from './active-record';
+import { serializeLocalTransaction } from '../local-transaction-lock';
 
 // Narrow whatever a caller passed — a class, an instance, or a `{type, name}` descriptor wrapping
 // either — down to a valid repository target. A string name, class, or EntitySchema is already one;
@@ -87,13 +88,15 @@ export abstract class StoreRecord extends BaseEntity {
     entities: T[],
     options?: SaveOptions,
   ): Promise<T[]> {
-    return manager.transaction(async (transactionManager) => {
-      const saved = await transactionManager.save(entities, options);
-      for (const record of saved as unknown as StoreRecord[]) {
-        await record.updateChangeLogWithManager(transactionManager);
-      }
-      return saved;
-    });
+    return serializeLocalTransaction(manager, () =>
+      manager.transaction(async (transactionManager) => {
+        const saved = await transactionManager.save(entities, options);
+        for (const record of saved as unknown as StoreRecord[]) {
+          await record.updateChangeLogWithManager(transactionManager);
+        }
+        return saved;
+      }),
+    );
   }
 
   static async save<T extends BaseEntity>(this: ObjectType<T>, entities: T[], options?: SaveOptions): Promise<any[]> {
@@ -179,11 +182,13 @@ export abstract class StoreRecord extends BaseEntity {
     if (!updateChangeLog) {
       return manager.save(this, options);
     }
-    return manager.transaction(async (transactionManager) => {
-      const savedRecord = await transactionManager.save(this, options);
-      await this.updateChangeLogWithManager(transactionManager);
-      return savedRecord;
-    });
+    return serializeLocalTransaction(manager, () =>
+      manager.transaction(async (transactionManager) => {
+        const savedRecord = await transactionManager.save(this, options);
+        await this.updateChangeLogWithManager(transactionManager);
+        return savedRecord;
+      }),
+    );
   }
 
   async save(options?: SaveOptions, updateChangeLog: boolean = true): Promise<this> {

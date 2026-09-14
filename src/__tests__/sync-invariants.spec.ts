@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { SqliteStore, StoreChangeLog } from '../index';
+import { serializeLocalTransaction, SqliteStore, StoreChangeLog } from '../index';
 import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from './fake-entities';
 import { FakeCloudStore } from './fake-cloud-store';
 
@@ -117,7 +117,7 @@ test.failing('re-delivery of an unchanged document does not rewrite the local ro
 });
 
 // I5 — the drain has a fixed trigger set, and network recovery is one of them. (F4)
-test.failing('coming back online drains the change log', async () => {
+test('coming back online drains the change log', async () => {
   network.next(false);
   await new Note({ text: 'offline edit' }).saveWithManager(dataSource.manager);
   await expect(changeLogCount()).resolves.toBe(1);
@@ -130,7 +130,8 @@ test.failing('coming back online drains the change log', async () => {
 
 // I1 — the download conflict path deletes change-log rows without checking their version, so a local
 // edit that lands while a newer cloud copy is being applied loses its queued row. (found in T3)
-test.failing('a local edit made while a newer cloud copy is being applied stays queued', async () => {
+// The edit is not awaited before the apply is released: a local save waits for the apply to finish.
+test('a local edit made while a newer cloud copy is being applied stays queued', async () => {
   const note = await stageOffline(() => new Note({ text: 'local v1' }).saveWithManager(dataSource.manager));
   const cloudCopy = new Note({ id: note.id, text: 'cloud', changeId: 7 });
   (cloudCopy as any).createdMs = (note as any).createdMs;
@@ -147,21 +148,24 @@ test.failing('a local edit made while a newer cloud copy is being applied stays 
 
   const apply = (cloud as any).resolveRecords(Note, [cloudCopy]);
   await sleep(20);
-  await stageOffline(async () => {
+  const edit = stageOffline(async () => {
     const edited = (await dataSource.getRepository(Note).findOneBy({ id: note.id }))!;
     edited.text = 'local v2';
     await edited.saveWithManager(dataSource.manager);
   });
+  await sleep(20);
   release();
   await apply;
+  await edit;
 
   await expect(changeLogCount()).resolves.toBe(1);
 });
 
 // I1/I7 — sqljs and Capacitor share one query runner, so an overlapping transaction nests as a
 // SAVEPOINT inside whichever transaction is open. When the outer one rolls back, it undoes a save that
-// already resolved to its caller. (found in T3)
-test.failing('a failed overlapping transaction does not undo a save that already resolved', async () => {
+// already resolved to its caller. The overlapping transaction stands in for the drain's write-back,
+// which runs under serializeLocalTransaction like every library transaction. (found in T3)
+test('a failed overlapping transaction does not undo a save that already resolved', async () => {
   const note = new Note({ text: 'user edit' });
   let releaseUser: () => void = () => undefined;
   const userGate = new Promise<void>((resolve) => (releaseUser = resolve));
@@ -175,10 +179,12 @@ test.failing('a failed overlapping transaction does not undo a save that already
   await sleep(10);
   let releaseOther: () => void = () => undefined;
   const otherGate = new Promise<void>((resolve) => (releaseOther = resolve));
-  const other = dataSource.manager.transaction(async () => {
-    await otherGate;
-    throw new Error('drain write failed');
-  });
+  const other = serializeLocalTransaction(dataSource.manager, () =>
+    dataSource.manager.transaction(async () => {
+      await otherGate;
+      throw new Error('drain write failed');
+    }),
+  );
   await sleep(10);
   releaseUser();
   await userSave;

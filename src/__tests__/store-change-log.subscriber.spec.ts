@@ -104,13 +104,14 @@ describe('when the subscriber holds a cloud', () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  test('does not push while offline', () => {
+  // The drain returns early offline itself, so the subscriber leaves that decision to it.
+  test('hands an offline commit to the drain', () => {
     const event = commitEvent({});
     subscriber.afterInsert(event);
     (cloud as any).networkSubject.next(false);
     subscriber.afterTransactionCommit(event);
 
-    expect(push).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledTimes(1);
   });
 
   test('does not make the commit wait on the cloud round-trip', () => {

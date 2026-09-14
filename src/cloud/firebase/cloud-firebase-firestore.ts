@@ -8,6 +8,7 @@ import { PathBuilder } from './protocol/path-builder';
 import { StoreRecordWriter } from './protocol/store-record-writer';
 import { VersionedRecord } from './protocol/firestore-port';
 import { WebFirestorePort } from './web-firestore-port';
+import { serializeLocalTransaction } from '../../local-transaction-lock';
 
 import { Observable } from 'rxjs';
 import { FirebaseApp, initializeApp } from 'firebase/app';
@@ -82,10 +83,7 @@ export class CloudFirebaseFirestore extends CloudStore {
     // `StoreRecord.getLatestChangeId(this.localStore.dataSource, ...)` call, now passed in as a
     // callback — the one piece the server can't supply (it seeds 0 instead).
     await this.writer.updateStoreRecord(this.asVersioned(obj), {
-      // NOT wrapped in serializeDbAccess: updateStoreRecord runs on the change-log push path, which a
-      // subscriber can fire from inside resolveRecordsLocked (itself already holding the queue), so
-      // serializing this read would nest the queue in itself and deadlock. It is a single lightweight
-      // read and, unlike the parallel download catch-up, not part of a concurrent fan-out.
+      // A single read outside any transaction, so it does not take the local transaction lock.
       seedChangeId: () =>
         StoreRecord.getLatestChangeId(
           this.localStore.dataSource,
@@ -156,35 +154,13 @@ export class CloudFirebaseFirestore extends CloudStore {
     this.firestoreSubscriptions = {};
   }
 
-  protected async subscribeRecord(record: typeof StoreRecord, isPrivate: boolean): Promise<any> {
-    console.debug('[subscribeRecord]', storeNameOf(record));
-    if (!this.firestoreSubscriptions.hasOwnProperty(storeNameOf(record))) {
-      console.debug('[subscribeRecord] subscribing');
-      await this.subscribeObj(record, isPrivate);
-    } else {
-      console.warn('Already subscribed', record);
-    }
-  }
-
-  protected unsubscribeRecord(record: typeof StoreRecord): any {
-    const recordName = storeNameOf(record);
-    console.debug('[unsubscribeRecord]', recordName);
-    if (this.firestoreSubscriptions.hasOwnProperty(recordName)) {
-      this.firestoreSubscriptions[recordName].unsubscribe();
-      delete this.firestoreSubscriptions[recordName];
-    } else {
-      console.warn('Trying to unsubscribe from a subscription that doesnt exist', record);
-    }
-  }
-
   // Done implementing CloudStore, now helper functions:
   protected async subscribeObj(obj: any, isPrivate: boolean = true) {
     console.debug('[CloudFirebaseFirestore - subscribeObj]', obj, isPrivate, storeNameOf(obj), obj.name);
     const queryLimit = 500;
-    // Serialized: this local read runs concurrently with every other collection's catch-up (the
-    // subscribe* fan-out is parallel) and with their resolveRecords writes; overlapping the single
-    // DataSource connection is what corrupted it into "undefined (reading 'query')".
-    const latestChangeId = await this.serializeDbAccess(() =>
+    // Serialized behind the local transaction lock so the read does not land inside another
+    // collection's catch-up transaction on the shared query runner.
+    const latestChangeId = await serializeLocalTransaction(this.manager, () =>
       StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
     );
     const objInstance = new obj();
@@ -197,9 +173,9 @@ export class CloudFirebaseFirestore extends CloudStore {
 
       let q = query(collectionRef, where('changeId', '>', latestChangeId), orderBy('changeId'), limit(queryLimit));
       // The paged catch-up is bounded, so the indicator can be held across it. The wait for the first
-      // onSnapshot callback below deliberately is not counted: that handshake is the one the
-      // updateCloudFromChangeLog TODO reports as sometimes never resolving, and a refcount held on it
-      // would pin the indicator on and block every later cloud push.
+      // onSnapshot callback below deliberately is not counted: that handshake has no error callback and
+      // can stay pending, and a refcount held on it would pin the indicator on and block every later
+      // cloud push.
       await this.trackDownload(async () => {
         let documentSnapshots = await getDocs(q);
         while (true) {
@@ -248,9 +224,8 @@ export class CloudFirebaseFirestore extends CloudStore {
         // Each delivery reads its own changeId: two callbacks can overlap, and sharing the outer
         // latestChangeId would let one clobber the other's cursor.
         void this.trackDownload(async () => {
-          // Serialized like the setup read above: a live delivery can land while another collection's
-          // catch-up or a change-log push is mid-operation on the same connection.
-          const changeId = await this.serializeDbAccess(() =>
+          // Serialized like the setup read above.
+          const changeId = await serializeLocalTransaction(this.manager, () =>
             StoreRecord.getLatestChangeId(this.localStore.dataSource, obj, isPrivate),
           );
           await this.resolveSnapshot(obj, snapshot, changeId, isPrivate, collectionPath);
@@ -371,7 +346,7 @@ export class CloudFirebaseFirestore extends CloudStore {
               const currentUser = this.user;
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
               const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-              await updatedUser.saveWithManager(this.manager, {}, false);
+              await serializeLocalTransaction(this.manager, () => updatedUser.saveWithManager(this.manager, {}, false));
             } else {
               // Nothing in the cloud yet: the local record is the only copy, and the drain uploads it.
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] no cloud user document yet');
