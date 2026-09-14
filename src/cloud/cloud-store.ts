@@ -66,7 +66,9 @@ export interface DeliveryStream {
   failed: boolean;
 }
 
-class UploadTimeoutError extends Error {}
+export class UploadTimeoutError extends Error {
+  name = 'UploadTimeoutError';
+}
 
 // Cloud-origin records written to the local database. Those saves run with entity listeners off, so
 // this is how the app learns that rows it displays have changed.
@@ -108,6 +110,15 @@ export abstract class CloudStore {
   // Emits after the local transaction lock is released, so a query run from a subscriber sees the rows.
   protected readonly appliedSubject = new Subject<AppliedRecords>();
   public readonly applied$: Observable<AppliedRecords> = this.appliedSubject.asObservable();
+
+  // Change-log rows not yet uploaded. Recounted after every commit that queues a change, every drain
+  // pass and every cloud delivery that changed local rows (a resolved conflict removes its row).
+  private readonly pendingSubject = new BehaviorSubject<number>(0);
+  public readonly pending$: Observable<number> = this.pendingSubject.asObservable();
+
+  // The most recent failed upload or private cloud subscribe; null again once one succeeds.
+  private readonly lastErrorSubject = new BehaviorSubject<unknown>(null);
+  public readonly lastError$: Observable<unknown> = this.lastErrorSubject.asObservable();
 
   protected privateCloudInitialized: boolean = false;
   protected localStore: SqliteStore;
@@ -167,6 +178,7 @@ export abstract class CloudStore {
   protected async _initializeBase(localStore: SqliteStore) {
     this.localStore = localStore;
     this.attachSubscribers(localStore.dataSource);
+    this.refreshPendingInBackground();
     // Precondition for any private sync: a local User record with an authId must already exist. It is
     // read here and it alone drives subscribePrivateCloud() → subscribeCloudUser(), which flips
     // privateCloudInitialized — the gate on the entire change-log drain (see updateCloudFromChangeLog).
@@ -181,7 +193,7 @@ export abstract class CloudStore {
     await this.trackDownload(async () => {
       await this.subscribePublicCloud();
       if (user) {
-        await this.subscribePrivateCloud();
+        await this.recordingError(() => this.subscribePrivateCloud());
       }
     });
     // Seed lastUser so the userSubject replay that subscribeLocalUser receives on subscribe is
@@ -248,6 +260,51 @@ export abstract class CloudStore {
     this.unsubscribePrivateCloud();
     this.subscriptions.unsubscribe();
     this.appliedSubject.complete();
+    this.pendingSubject.complete();
+    this.lastErrorSubject.complete();
+  }
+
+  // Recount the change log. Public so a caller that deletes change-log rows outside the library's
+  // writes (dropping private data at sign-out) can bring pending$ back in line.
+  public async refreshPending(): Promise<void> {
+    if (!this.localStore || this.disposed) {
+      return;
+    }
+    const count = await serializeLocalTransaction(this.manager, async () =>
+      this.disposed || !this.localStore.dataSource.isInitialized
+        ? null
+        : this.manager.getRepository(StoreChangeLog).count(),
+    );
+    if (count !== null && !this.disposed) {
+      this.pendingSubject.next(count);
+    }
+  }
+
+  public refreshPendingInBackground() {
+    void this.refreshPending().catch((e) => console.warn('[CloudStore] could not count pending changes', e));
+  }
+
+  private async recordingError<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      const result = await work();
+      this.clearLastError();
+      return result;
+    } catch (error) {
+      this.recordError(error);
+      throw error;
+    }
+  }
+
+  private recordError(error: unknown) {
+    if (!this.disposed) {
+      this.lastErrorSubject.next(error);
+    }
+  }
+
+  private clearLastError() {
+    if (!this.disposed && this.lastErrorSubject.getValue() !== null) {
+      this.lastErrorSubject.next(null);
+    }
   }
 
   private subscribeNetwork() {
@@ -286,7 +343,7 @@ export abstract class CloudStore {
           console.debug('[CloudStore - subscribeLocalUser] subscribing to private cloud...');
           // Fire-and-forget with its own catch: a rejected subscribe used to leave the indicator
           // stuck on forever, which also blocked updateCloudFromChangeLog for the rest of the session.
-          void this.trackDownload(() => this.subscribePrivateCloud()).catch((e) =>
+          void this.trackDownload(() => this.recordingError(() => this.subscribePrivateCloud())).catch((e) =>
             console.warn('[CloudStore - subscribeLocalUser] private cloud subscribe failed', e),
           );
         } else {
@@ -364,7 +421,11 @@ export abstract class CloudStore {
     try {
       do {
         this.queueUpdateCloudFromChangeLog = false;
-        await this.drainChangeLogOnce();
+        try {
+          await this.drainChangeLogOnce();
+        } finally {
+          await this.refreshPending();
+        }
       } while (this.queueUpdateCloudFromChangeLog && this.canDrain());
     } finally {
       this.drainInFlight = null;
@@ -403,6 +464,7 @@ export abstract class CloudStore {
       }
       try {
         const upload = await this.withTimeout(this.updateStoreRecord(record), this.uploadTimeoutMs);
+        this.clearLastError();
         let storedNewerCloudCopy = false;
         await serializeLocalTransaction(this.manager, async () => {
           // Tenant.dispose destroys the DataSource under this lock, so the check cannot go stale.
@@ -433,6 +495,7 @@ export abstract class CloudStore {
           this.appliedSubject.next({ recordType: record.constructor as typeof StoreRecord, count: 1 });
         }
       } catch (err) {
+        this.recordError(err);
         if (err instanceof UploadTimeoutError) {
           console.warn('[updateCloudFromChangeLog] upload timed out, leaving the remaining changes queued', err);
           return;
@@ -558,6 +621,7 @@ export abstract class CloudStore {
     // refresh after each of its own edits.
     if (appliedCount > 0 && !this.disposed) {
       this.appliedSubject.next({ recordType, count: appliedCount });
+      this.refreshPendingInBackground();
     }
   }
 

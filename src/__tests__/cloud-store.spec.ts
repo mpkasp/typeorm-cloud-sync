@@ -599,6 +599,88 @@ describe('applied$', () => {
   });
 });
 
+test('pending$ starts from the rows already queued when the store initializes', async () => {
+  await seedUser();
+  await new Note({ text: 'queued' }).save();
+  await new Note({ text: 'queued too' }).save();
+  network.next(false);
+  let pending = -1;
+  cloud.pending$.subscribe((count) => (pending = count));
+
+  await cloud.initialize(sqliteStore);
+
+  await waitFor(() => pending === 2);
+});
+
+describe('sync status', () => {
+  beforeEach(async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await cloud.whenIdle();
+  });
+
+  const latest = <T>(source: { subscribe: (next: (value: T) => void) => unknown }): (() => T) => {
+    let value: T;
+    source.subscribe((next) => (value = next));
+    return () => value;
+  };
+
+  test('pending$ counts a change queued offline, and returns to 0 once the drain uploads it', async () => {
+    const pending = latest(cloud.pending$);
+    expect(pending()).toBe(0);
+
+    await stageOffline(async () => {
+      await new Note({ text: 'one' }).save();
+      await new Note({ text: 'two' }).save();
+      await waitFor(() => pending() === 2);
+    });
+    await cloud.whenIdle();
+
+    expect(pending()).toBe(0);
+  });
+
+  test('lastError$ holds a failed upload until a later upload succeeds', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lastError = latest(cloud.lastError$);
+    const failure = new Error('permission-denied');
+    const upload = cloud.updateStoreRecord.bind(cloud);
+    const updateStoreRecord = jest.spyOn(cloud, 'updateStoreRecord').mockRejectedValueOnce(failure);
+
+    await stageOffline(() => new Note({ text: 'refused' }).save());
+    await cloud.whenIdle();
+
+    expect(lastError()).toBe(failure);
+
+    updateStoreRecord.mockImplementation((record) => upload(record));
+    await cloud.drain();
+
+    expect(lastError()).toBeNull();
+  });
+
+  test('refreshPending follows change-log rows deleted outside the library', async () => {
+    const pending = latest(cloud.pending$);
+    await stageOffline(async () => {
+      await new Note({ text: 'dropped' }).save();
+      await waitFor(() => pending() === 1);
+      await sqliteStore.dropPrivateTypeOrmCloudSyncRecords();
+    });
+
+    await cloud.refreshPending();
+
+    expect(pending()).toBe(0);
+  });
+
+  test('both streams complete on dispose', async () => {
+    let completed = 0;
+    cloud.pending$.subscribe({ complete: () => completed++ });
+    cloud.lastError$.subscribe({ complete: () => completed++ });
+
+    cloud.dispose();
+
+    expect(completed).toBe(2);
+  });
+});
+
 describe('with the ActiveRecord global bound to another database', () => {
   test('the drain uploads its own store and leaves the other database untouched', async () => {
     await seedUser();

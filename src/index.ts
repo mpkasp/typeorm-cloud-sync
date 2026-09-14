@@ -13,7 +13,7 @@ export type { TenantOpener } from './tenant';
 
 export { CloudFirebaseFirestore } from './cloud/firebase/cloud-firebase-firestore';
 export { WebFirestorePort } from './cloud/firebase/web-firestore-port';
-export { CloudStore } from './cloud/cloud-store';
+export { CloudStore, UploadTimeoutError } from './cloud/cloud-store';
 export type { AppliedRecords } from './cloud/cloud-store';
 
 // Firestore write protocol, shared by the web-SDK client adapter and the Admin-SDK server binding.

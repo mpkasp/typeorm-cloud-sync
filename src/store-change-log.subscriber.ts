@@ -32,6 +32,7 @@ export class StoreChangeLogSubscriber implements EntitySubscriberInterface<Store
       return;
     }
     event.queryRunner.data.StoreChangeLog = { insert: false, update: false };
+    this.cloud.refreshPendingInBackground();
     // Fire-and-forget, NOT `return`: TypeORM awaits a promise returned from a subscriber, so
     // returning this would block every local commit on a full cloud round-trip — the opposite of
     // local-first. The StoreChangeLog rows persist the pending work, and updateCloudFromChangeLog
