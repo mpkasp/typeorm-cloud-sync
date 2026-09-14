@@ -87,7 +87,7 @@ test('a local edit made while its record is mid-upload is not dropped from the c
 });
 
 // I2 — cloud-origin writes never invent data: timestamps travel with the record. (F5)
-test.failing('a downloaded record keeps the createdMs/updatedMs the cloud document carries', async () => {
+test('a downloaded record keeps the createdMs/updatedMs the cloud document carries', async () => {
   const cloudNote = new Note({ id: 'n1', text: 'from cloud', changeId: 7 });
   (cloudNote as any).createdMs = 1_000_000;
   (cloudNote as any).updatedMs = 2_000_000;
@@ -100,7 +100,7 @@ test.failing('a downloaded record keeps the createdMs/updatedMs the cloud docume
 });
 
 // I2 — re-delivering an identical document is a no-op locally. (F5, F6)
-test.failing('re-delivery of an unchanged document does not rewrite the local row', async () => {
+test('re-delivery of an unchanged document does not rewrite the local row', async () => {
   const deliver = async () => {
     const doc = new Note({ id: 'n1', text: 'from cloud', changeId: 7 });
     (doc as any).createdMs = 1_000_000;

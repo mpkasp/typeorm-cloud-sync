@@ -124,6 +124,18 @@ describe('subscribeObj live deliveries', () => {
     expect(await dataSource.getRepository(Tag).count()).toBe(2);
   });
 
+  // F5: the clean insert path now saves with listeners off (see resolveRecordsLocked), so the
+  // @BeforeInsert hook that used to fill these in no longer runs. deserialize is the one place left
+  // that backfills a server-written document (the inbox projection Cloud Function omits them).
+  test('fills in createdMs/updatedMs for a cloud document that omits them', async () => {
+    listeners[0](snapshotOf([tagDoc('tag-1', 7)]));
+    await waitFor(() => !cloud.downloading);
+
+    const stored = (await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })) as any;
+    expect(stored.createdMs).toEqual(expect.any(Number));
+    expect(stored.updatedMs).toEqual(expect.any(Number));
+  });
+
   // A delivery that throws must not pin the indicator on: `downloading` gates updateCloudFromChangeLog,
   // so a stuck indicator would silently stop every later upload for the rest of the session.
   test('releases the indicator when a delivery fails to apply', async () => {

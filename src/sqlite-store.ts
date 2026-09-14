@@ -2,7 +2,7 @@
 import { StoreRecord } from './models/store-record.model';
 import { StoreChangeLog } from './models/store-change-log.model';
 
-import { DataSource, EntityManager } from 'typeorm/browser';
+import { DataSource, EntityManager, SaveOptions } from 'typeorm/browser';
 import { BaseUser } from './models/base-user.model';
 
 export class SqliteStore {
@@ -40,10 +40,35 @@ export class SqliteStore {
           cloudRecord,
         );
         try {
-          const record = await this.saveRecord(cloudRecord, false);
+          // Read the change-log row(s) before touching anything, then delete by id+version in the
+          // same transaction as the cloud save — the drain's shape (T3/T4). If a local edit lands
+          // between the read above and here, the version has moved on and the delete affects nothing:
+          // that edit is newer than this comparison, so the cloud copy is discarded and the local
+          // record stays queued rather than being overwritten.
+          // resolve() is only reached through CloudStore.resolveRecords, which already holds the
+          // per-DataSource lock (T4) for the whole page; a second serializeLocalTransaction here
+          // would wait on the chain slot this same call occupies and deadlock.
           const changeLogs = await StoreChangeLog.getFromRecordWithManager(this.manager, localRecord);
-          await this.manager.remove(changeLogs);
-          return record;
+          return await this.manager.transaction(async (manager) => {
+            const deletions = await Promise.all(
+              changeLogs.map((changeLog) =>
+                manager
+                  .createQueryBuilder()
+                  .delete()
+                  .from(StoreChangeLog)
+                  .where('id = :id AND version = :version', { id: changeLog.id, version: changeLog.version })
+                  .execute(),
+              ),
+            );
+            if (changeLogs.length > 0 && !deletions.some((result) => result.affected === 1)) {
+              return null;
+            }
+            // Routed through saveRecord (not the transaction's `manager` directly) so callers that
+            // spy on it to observe/gate a cloud-origin write — the drain does the same — see this one
+            // too. sqljs/Capacitor hand every EntityManager the same query runner (see
+            // local-transaction-lock.ts), so this still executes inside the transaction above.
+            return this.saveRecord(cloudRecord, false);
+          });
         } catch (e) {
           console.warn('[CloudSync - SqliteStore - resolve] unable to insert record', cloudRecord, e);
           return null;
@@ -64,7 +89,11 @@ export class SqliteStore {
   }
 
   public async saveRecord(record: StoreRecord, updateChangeLog: boolean = true): Promise<StoreRecord> {
-    return await record.saveWithManager(this.manager, {}, updateChangeLog);
+    // A save with updateChangeLog false is always cloud-origin data, not a local edit: listeners off
+    // keeps the @BeforeInsert/@BeforeUpdate hooks from stamping the local write time over the
+    // timestamps the cloud document carries (see resolveRecordsLocked's bulk save).
+    const options: SaveOptions = updateChangeLog ? {} : { listeners: false };
+    return await record.saveWithManager(this.manager, options, updateChangeLog);
   }
 
   public async dropPrivateTypeOrmCloudSyncRecords() {

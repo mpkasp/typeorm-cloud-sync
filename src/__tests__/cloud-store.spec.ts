@@ -356,7 +356,12 @@ describe('resolveRecord', () => {
 
   test('resolveRecords bulk-saves clean cloud records without the per-record resolve path', async () => {
     const resolve = jest.spyOn(sqliteStore, 'resolve');
-    const incoming = Array.from({ length: 5 }, (_, i) => new Note({ id: `note-${i}`, text: `n${i}` }));
+    // A cloud-origin record as it reaches resolveRecords: already carrying createdMs/updatedMs, the
+    // way CloudFirebaseFirestore.deserialize backfills them before construction.
+    const incoming = Array.from(
+      { length: 5 },
+      (_, i) => new Note({ id: `note-${i}`, text: `n${i}`, createdMs: 1000, updatedMs: 1000 }),
+    );
 
     const resolved = await (cloud as any).resolveRecords(Note, incoming);
 

@@ -409,19 +409,28 @@ export abstract class CloudStore {
   }
 
   private async resolveRecordsLocked(recordType: typeof StoreRecord, objs: StoreRecord[]) {
-    const pendingIds = await this.pendingChangeIds(objs);
+    // Drop anything the local row already has: a re-delivered document (Firestore replays the
+    // backlog on reconnect) or a stale page. Comparing against the current changeId rather than
+    // relying on the cloud to only ever send new data keeps re-delivery a true no-op.
+    const localChangeIds = await this.localChangeIds(recordType, objs);
+    const incoming = objs.filter((obj) => {
+      const localChangeId = obj.id ? localChangeIds.get(obj.id) : undefined;
+      return localChangeId == null || obj.changeId > localChangeId;
+    });
+
+    const pendingIds = await this.pendingChangeIds(incoming);
     const clean: StoreRecord[] = [];
     const conflicted: StoreRecord[] = [];
-    for (const obj of objs) {
+    for (const obj of incoming) {
       (pendingIds.has(obj.id as string) ? conflicted : clean).push(obj);
     }
 
     const resolvedRecords: StoreRecord[] = [];
     if (clean.length > 0) {
-      // Cloud-origin data, so no change-log rows are written (this is not a local edit). Listeners
-      // stay on: the @BeforeInsert/@BeforeUpdate hooks that populate createdMs/updatedMs run through
-      // them, and the cloud subscribers do not listen to these record types.
-      const saved = await this.manager.save(clean, { chunk: 500 });
+      // Cloud-origin data, so no change-log rows are written (this is not a local edit), and
+      // listeners stay off: the @BeforeInsert/@BeforeUpdate hooks that populate createdMs/updatedMs
+      // would otherwise stamp the local write time over the timestamps the cloud document carries.
+      const saved = await this.manager.save(clean, { chunk: 500, listeners: false });
       resolvedRecords.push(...(saved as unknown as StoreRecord[]));
     }
     for (const obj of conflicted) {
@@ -431,6 +440,19 @@ export abstract class CloudStore {
       }
     }
     return resolvedRecords;
+  }
+
+  // One query for the whole page's current local changeIds, so a re-delivered or stale document can
+  // be dropped before it reaches the conflict split.
+  private async localChangeIds(recordType: typeof StoreRecord, objs: StoreRecord[]): Promise<Map<string, number>> {
+    const ids = objs.map((obj) => obj.id).filter((id): id is string => id != null);
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const rows = await this.manager
+      .getRepository(recordType)
+      .find({ where: { id: In(ids) } as any, select: { id: true, changeId: true } as any });
+    return new Map(rows.map((row) => [row.id as string, row.changeId]));
   }
 
   // One query for the whole page's pending change-log rows, replacing the per-record findOne that

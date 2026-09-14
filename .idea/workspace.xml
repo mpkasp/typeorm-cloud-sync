@@ -6,15 +6,13 @@
   <component name="ChangeListManager">
     <list default="true" id="688447fe-d3aa-4617-8716-8f8496da2684" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/store-change-log.subscriber.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/store-change-log.subscriber.spec.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__tests__/store-record.model.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/store-record.model.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__tests__/cloud-store.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/cloud-store.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__tests__/sqlite-store.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/sqlite-store.spec.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/__tests__/sync-invariants.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/__tests__/sync-invariants.spec.ts" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/cloud/cloud-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/cloud-store.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/models/store-change-log.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-change-log.model.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/models/store-record.model.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/models/store-record.model.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/store-change-log.subscriber.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/__tests__/cloud-firebase-firestore.spec.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/__tests__/cloud-firebase-firestore.spec.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/cloud/firebase/cloud-firebase-firestore.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sqlite-store.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/sqlite-store.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -116,32 +114,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "WebServerToolWindowFactoryState": "false",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "main",
-    "javascript.preferred.runtime.type.id": "node",
-    "junie.onboarding.icon.badge.shown": "true",
-    "last_opened_file_path": "/Users/mike/Code/mpkasp/typeorm-cloud-sync",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs.jest.jest_package": "/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/jest",
-    "nodejs_package_manager_path": "npm",
-    "npm.test.executor": "Run",
-    "to.speed.mode.migration.done": "true",
-    "ts.external.directory.path": "/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/typescript/lib",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;javascript.preferred.runtime.type.id&quot;: &quot;node&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/mike/Code/mpkasp/typeorm-cloud-sync&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs.jest.jest_package&quot;: &quot;/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/jest&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;npm.test.executor&quot;: &quot;Run&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;/Users/mike/Code/mpkasp/typeorm-cloud-sync/node_modules/typescript/lib&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/src" />

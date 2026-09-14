@@ -120,6 +120,15 @@ export class CloudFirebaseFirestore extends CloudStore {
     }
     if (data && id) {
       data.id = id;
+      // Server-written records (the inbox projection Cloud Function) omit createdMs/updatedMs on
+      // purpose; the clean insert path used to fill them via @BeforeInsert, which listeners:false
+      // (see resolveRecordsLocked) now skips. Filling them here, once, keeps every cloud-origin save
+      // this store performs from ending up with a null timestamp.
+      if (data.createdMs == null || data.updatedMs == null) {
+        const now = Date.now();
+        data.createdMs = data.createdMs ?? now;
+        data.updatedMs = data.updatedMs ?? now;
+      }
     }
     // data.isPrivate = isPrivate;
     return data;
@@ -346,7 +355,9 @@ export class CloudFirebaseFirestore extends CloudStore {
               const currentUser = this.user;
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] about to assign', data, currentUser);
               const updatedUser = currentUser ? Object.assign(currentUser, data) : new this.UserModel(data);
-              await serializeLocalTransaction(this.manager, () => updatedUser.saveWithManager(this.manager, {}, false));
+              await serializeLocalTransaction(this.manager, () =>
+                updatedUser.saveWithManager(this.manager, { listeners: false }, false),
+              );
             } else {
               // Nothing in the cloud yet: the local record is the only copy, and the drain uploads it.
               console.debug('[CloudFirebaseFirestore - subscribeCloudUser] no cloud user document yet');

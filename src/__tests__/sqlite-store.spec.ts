@@ -13,8 +13,12 @@ let sqliteStore: SqliteStore;
 
 const setUpdated = (record: StoreRecord, ms: number) => Object.assign(record, { updatedMs: ms });
 
-// A record as it arrives from the cloud: never persisted locally, carrying the cloud's id.
-const cloudNote = (init: Partial<any>) => Object.assign(new Note(init), { updatedMs: init.updatedMs });
+// A record as it arrives from the cloud: never persisted locally, carrying the cloud's id. Real
+// cloud data always passes through CloudFirebaseFirestore.deserialize first, which backfills
+// createdMs/updatedMs when the document lacks them (see cloud-firebase-firestore.spec.ts); this
+// fixture stands in for that already-deserialized shape.
+const cloudNote = (init: Partial<any>) =>
+  Object.assign(new Note(init), { createdMs: init.createdMs ?? init.updatedMs, updatedMs: init.updatedMs });
 
 // A second DataSource over the same entity classes steals the ActiveRecord binding, so anything
 // still resolving against the global would write here instead of into the store under test.
@@ -166,7 +170,12 @@ describe('with the ActiveRecord global bound to another database', () => {
   });
 
   test('a local-wins resolve re-queues into its own change log', async () => {
-    const local = await sqliteStore.saveRecord(new Note({ text: 'local edit' }), false);
+    // updateChangeLog false stands in for a record already synced from the cloud with no pending
+    // change, so it needs createdMs/updatedMs the way a deserialized cloud document would.
+    const local = await sqliteStore.saveRecord(
+      Object.assign(new Note({ text: 'local edit' }), { createdMs: 500, updatedMs: 500 }),
+      false,
+    );
     setUpdated(local, 2000);
     const other = await stealActiveRecordBinding();
 
