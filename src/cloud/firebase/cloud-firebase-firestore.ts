@@ -126,13 +126,13 @@ export class CloudFirebaseFirestore extends CloudStore {
     if (data && id) {
       data.id = id;
       // Server-written records (the inbox projection Cloud Function) omit createdMs/updatedMs on
-      // purpose; the clean insert path used to fill them via @BeforeInsert, which listeners:false
-      // (see resolveRecordsLocked) now skips. Filling them here, once, keeps every cloud-origin save
-      // this store performs from ending up with a null timestamp.
+      // purpose, and cloud-origin saves run with listeners off, so the columns are filled here.
+      // updatedMs is 0, never the download time: the projection carries a subset of the record a
+      // device saved for the same event, and a pending local copy must win the conflict in
+      // SqliteStore.resolve so its upload stays queued.
       if (data.createdMs == null || data.updatedMs == null) {
-        const now = Date.now();
-        data.createdMs = data.createdMs ?? now;
-        data.updatedMs = data.updatedMs ?? now;
+        data.createdMs = data.createdMs ?? Date.now();
+        data.updatedMs = data.updatedMs ?? 0;
       }
     }
     // data.isPrivate = isPrivate;

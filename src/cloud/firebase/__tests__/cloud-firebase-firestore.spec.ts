@@ -1,10 +1,10 @@
 import { BehaviorSubject } from 'rxjs';
 import { DataSource } from 'typeorm/browser';
-import { getDocs, limit, onSnapshot, query, where } from 'firebase/firestore';
+import { getDocs, limit, onSnapshot, query, runTransaction, where } from 'firebase/firestore';
 import { SqliteStore } from '../../../sqlite-store';
 import { StoreChangeLog } from '../../../models/store-change-log.model';
 import { Meta } from '../../../models/meta.model';
-import { createTestDataSource, Note, silenceLibraryLogs, Tag, User } from '../../../__tests__/fake-entities';
+import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from '../../../__tests__/fake-entities';
 import { CloudFirebaseFirestore } from '../cloud-firebase-firestore';
 
 // The modular web SDK stands in for a real backend so the subscription bookkeeping around
@@ -177,6 +177,19 @@ describe('subscribeObj live deliveries', () => {
     const stored = (await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })) as any;
     expect(stored.createdMs).toEqual(expect.any(Number));
     expect(stored.updatedMs).toEqual(expect.any(Number));
+  });
+
+  // The projection writes only the fields the device forwarded, so it is never a newer edit than the
+  // full record the device saved for the same event and has not uploaded yet.
+  test('a server-written document does not drop a pending local edit of the same record', async () => {
+    (runTransaction as jest.Mock).mockRejectedValue(new Error('offline'));
+    await new Tag({ id: 'tag-1', label: 'local edit' }).saveWithManager(dataSource.manager);
+    await cloud.whenIdle();
+
+    listeners[0](snapshotOf([{ id: 'tag-1', changeId: 7, isDeleted: false, isPrivate: false }]));
+    await waitFor(() => !cloud.downloading);
+
+    expect(await changeLogs(dataSource).countBy({ recordId: 'tag-1' })).toBe(1);
   });
 
   test('applies only the documents a delivery changed', async () => {
