@@ -198,6 +198,14 @@ describe('StoreRecordWriter — versioned records', () => {
 });
 
 describe('StoreRecordWriter — User record', () => {
+  it('refuses a user with no authId instead of reporting it uploaded', async () => {
+    const port = new FakeFirestorePort();
+    const rec = record({ storeName: 'User', id: 'local', fields: { displayName: 'Ada' } });
+
+    await expect(writer(port).updateStoreRecord(rec)).rejects.toThrow('authId');
+    expect(port.paths()).toEqual([]);
+  });
+
   it('creates a missing user document without bumping changeId', async () => {
     const port = new FakeFirestorePort();
     const rec = record({ storeName: 'User', id: 'ignored', authId: AUTH, fields: { displayName: 'Ada' } });

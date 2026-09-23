@@ -220,3 +220,26 @@ test('an upload that writes a higher changeId locally does not move the cursor',
   expect(uploaded!.changeId).toBe(11);
   await expect(cloud.readCursor(Note, true)).resolves.toBe(10);
 });
+
+// I11 — private sync starts only for a local user with an authId.
+test('a local user without an authId syncs nothing until it gets one, then uploads its queued change', async () => {
+  await drainSettled();
+  await dataSource.destroy();
+  dataSource = await createTestDataSource([User, Note, Tag, StoreChangeLog, Meta]);
+  sqliteStore = new SqliteStore(dataSource, User);
+  cloud = new FakeCloudStore(User, [Tag], [Note], network);
+  const user = await new User({ displayName: 'Ada' }).saveWithManager(dataSource.manager);
+
+  await cloud.initialize(sqliteStore);
+  await cloud.updateCloudFromChangeLog();
+
+  expect(cloud.calls).not.toContain('subscribePrivate:Note');
+  await expect(changeLogCount()).resolves.toBe(1);
+
+  user.authId = AUTH_ID;
+  await user.saveWithManager(dataSource.manager);
+
+  await waitFor(async () => (await changeLogCount()) === 0);
+  expect(cloud.calls).toContain('subscribePrivate:Note');
+  expect(cloud.port.get(`User/${AUTH_ID}`)).toMatchObject({ displayName: 'Ada' });
+});

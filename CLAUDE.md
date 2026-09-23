@@ -60,6 +60,9 @@ Every change must preserve these. When a change touches one, add or update a tes
 10. **The cursor never passes a record the device does not hold.** A store that fails is thrown, not
     swallowed; the delivery is retried after the next one that succeeds; collections are stored in the
     declared order so a referenced row lands first.
+11. **Private sync starts only for a local user with an `authId`.** A User row without one (settings
+    kept before sign-in) subscribes nothing and uploads nothing; its changes stay queued until a user
+    with an `authId` reaches `userSubject`.
 
 ## Working rules
 

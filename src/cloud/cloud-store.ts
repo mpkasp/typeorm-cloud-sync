@@ -195,11 +195,12 @@ export abstract class CloudStore {
     this.localStore = localStore;
     this.attachSubscribers(localStore.dataSource);
     this.refreshPendingInBackground();
-    // Precondition for any private sync: a local User record with an authId must already exist. It is
-    // read here and it alone drives subscribePrivateCloud() → subscribeCloudUser(), which flips
-    // privateCloudInitialized — the gate on the entire change-log drain (see updateCloudFromChangeLog).
-    // Without it the store subscribes to nothing and queues local writes forever, silently. A managed
-    // account must therefore have its User (with the minted authId) saved locally before it can sync.
+    // Precondition for any private sync: a local User record with an authId. It is read here and it
+    // alone drives subscribePrivateCloud() → subscribeCloudUser(), which flips privateCloudInitialized —
+    // the gate on the entire change-log drain (see updateCloudFromChangeLog). A User row can exist before
+    // it has an authId (an app keeping settings on it before sign-in); that user subscribes nothing and
+    // its changes stay queued until a user with an authId reaches userSubject (subscribeLocalUser). A
+    // managed account must therefore have its User (with the minted authId) saved locally before it can sync.
     const user = await this.manager
       .getRepository(this.UserModel)
       .findOne({ where: { isDeleted: false }, order: { changeId: 'DESC' } });
@@ -208,7 +209,7 @@ export abstract class CloudStore {
     this.subscribeNetwork();
     await this.trackDownload(async () => {
       await this.subscribePublicCloud();
-      if (user) {
+      if (user?.authId) {
         await this.recordingError(() => this.subscribePrivateCloud());
       }
     });

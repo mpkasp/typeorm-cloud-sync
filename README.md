@@ -242,6 +242,8 @@ created before download cursors needs `MetaCursorIdentity1789400000000`, unless 
 
 - **Public** records sync to a top-level collection and are downloaded for every user.
 - **Private** records sync under the signed-in user's document and require an authenticated user.
+  A local `User` row may exist before it has an `authId` (to hold settings before sign-in); private
+  sync waits, with its changes queued, until the row is saved with one.
 
 You declare which is which when constructing the cloud store (the second and third constructor
 arguments). A record's own `isPrivate` flag must match the list it's registered under.

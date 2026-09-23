@@ -38,9 +38,10 @@ export class StoreRecordWriter {
       // console.log('[updateStoreRecord] User');
       console.debug('[updateStoreRecord] User Document: ', obj);
       const user = obj;
+      // Thrown rather than skipped: a result tells the drain the record reached the cloud, and the drain
+      // would then delete the change it still has to upload.
       if (!user.authId) {
-        console.warn('Trying to update user object without an auth id', user);
-        return { record: obj };
+        throw new Error('Cannot upload a User without an authId');
       }
       console.debug('[updateStoreRecord] User Document with valid id: ', user, user?.authId);
       const userPath = this.paths.userDocument(user.authId);
