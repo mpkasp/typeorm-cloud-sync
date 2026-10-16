@@ -33,6 +33,7 @@ import {
 } from 'firebase/firestore';
 
 const CATCH_UP_PAGE_SIZE = 500;
+const REMEMBERED_WRITTEN_VERSIONS = 200;
 
 export class CloudFirebaseFirestore extends CloudStore {
   db: Firestore;
@@ -41,6 +42,9 @@ export class CloudFirebaseFirestore extends CloudStore {
   // over an Admin-SDK port), bound here to the modular web SDK. See src/cloud/firebase/protocol.
   private readonly paths = new PathBuilder(() => this.user?.authId);
   private writer!: StoreRecordWriter;
+  // Versions this store wrote (`storeName/id/changeId`), oldest first, so a listener can tell its own
+  // upload echoing back from another writer's change. Each is consumed by the delivery that matches it.
+  private readonly writtenVersions = new Set<string>();
 
   // Construction performs no I/O: it touches no Firestore handle, opens no listener, and reaches no
   // network — it only wires up the observables (network$/user$/downloading$). getFirestore and every
@@ -183,6 +187,7 @@ export class CloudFirebaseFirestore extends CloudStore {
 
   protected unsubscribePrivateCloud() {
     this.privateCloudInitialized = false;
+    this.writtenVersions.clear();
     Object.entries(this.firestoreSubscriptions).forEach(([_, fs]) => fs.unsubscribe());
     this.firestoreSubscriptions = {};
   }
@@ -284,9 +289,22 @@ export class CloudFirebaseFirestore extends CloudStore {
             settle();
             return;
           }
+          let ownVersionCount = 0;
+          for (const document of changedDocuments) {
+            const key = versionKey(storeNameOf(objInstance), document.id, document.data().changeId);
+            if (this.writtenVersions.delete(key)) {
+              ownVersionCount++;
+            }
+          }
           // Everything that arrives after setup — including the backlog Firestore streams on
-          // reconnect — lands here. Counting it keeps the indicator up while that data is written.
-          void this.trackDownload(() => this.resolveSnapshot(obj, changedDocuments, isPrivate, collectionPath, stream))
+          // reconnect — lands here. Counting it keeps the indicator up while that data is written,
+          // except for a delivery that only echoes this store's own uploads, which carries nothing the
+          // user does not already have.
+          const indicate = ownVersionCount < changedDocuments.length;
+          void this.trackDownload(
+            () => this.resolveSnapshot(obj, changedDocuments, isPrivate, collectionPath, stream),
+            { indicate },
+          )
             .catch((error) =>
               console.warn('[CloudFirebaseFirestore - subscribeObj] failed applying snapshot', collectionPath, error),
             )
@@ -336,11 +354,24 @@ export class CloudFirebaseFirestore extends CloudStore {
     });
   }
 
+  // Remembered before the transaction commits: Firestore can deliver the echo first.
+  private rememberWrittenVersion(storeName: string, id: string, changeId: number) {
+    this.writtenVersions.add(versionKey(storeName, id, changeId));
+    if (this.writtenVersions.size > REMEMBERED_WRITTEN_VERSIONS) {
+      this.writtenVersions.delete(this.writtenVersions.values().next().value as string);
+    }
+  }
+
   // Adapt a StoreRecord to the protocol's minimal record view. changeId / recordChangeTimestamp are
   // live accessors so the writer's mutations land back on the entity, and raw() defers to the entity raw().
+  // Every changeId the writer sets is remembered as written. One set by a transaction attempt that did
+  // not commit, or restored after a newer cloud copy, can at worst keep the indicator down for one
+  // delivery; it never changes what is applied.
   private asVersioned(obj: StoreRecord): VersionedRecord {
+    const storeName = storeNameOf(obj);
+    const rememberWritten = (changeId: number) => this.rememberWrittenVersion(storeName, obj.id as string, changeId);
     return {
-      storeName: storeNameOf(obj),
+      storeName,
       id: obj.id as string,
       isPrivate: obj.isPrivate,
       authId: (obj as any).authId,
@@ -349,6 +380,7 @@ export class CloudFirebaseFirestore extends CloudStore {
       },
       set changeId(v: number) {
         obj.changeId = v;
+        rememberWritten(v);
       },
       get recordChangeTimestamp() {
         return obj.recordChangeTimestamp;
@@ -433,6 +465,10 @@ export class CloudFirebaseFirestore extends CloudStore {
       };
     });
   }
+}
+
+function versionKey(storeName: string, id: string, changeId: number): string {
+  return `${storeName}/${id}/${changeId}`;
 }
 
 interface FirestoreSubscription {

@@ -106,16 +106,20 @@ export abstract class CloudStore {
     return this.userSubject.getValue();
   }
 
-  // `downloading` is a refcount rather than a flag because setup and live snapshot deliveries can be
-  // in flight at the same time. As a boolean, whichever finished first reported "done" while the
-  // others were still writing. Subscribers only see a transition when the count leaves or reaches 0.
+  // Two refcounts, because setup, live deliveries and a caller's connect can overlap; as booleans,
+  // whichever finished first would report "done" for the others. `downloadCount` is download work, a
+  // cloud delivery being written locally: it gates the drain and whenIdle, and its return to 0 is the
+  // drain's "download settled" trigger. `indicatorCount` drives `downloading$`, which is what a user
+  // sees: it covers download work except the store's own upload echoes, plus any holdDownloadingWhile.
+  // Each emits only when its count leaves or reaches 0.
   private downloadCount: number = 0;
   private downloadsSettled: Promise<void> | null = null;
   private settleDownloads: () => void = () => undefined;
+  private indicatorCount: number = 0;
   protected downloadingSubject: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(false);
   public downloading$: Observable<boolean> = this.downloadingSubject.asObservable();
   public get downloading(): boolean {
-    return this.downloadingSubject.getValue();
+    return this.downloadCount > 0;
   }
 
   // Emits after the local transaction lock is released, so a query run from a subscriber sees the rows.
@@ -151,27 +155,61 @@ export abstract class CloudStore {
   // An upload that has not settled by then is abandoned for this drain; its change-log row stays queued.
   protected uploadTimeoutMs: number = 15_000;
 
-  // Hold the downloading indicator up for the duration of `work`. Nests: only the outermost pair emits.
-  protected async trackDownload<T>(work: () => Promise<T>): Promise<T> {
+  // Count `work` as download work for its duration, and raise the indicator unless `indicate` is false.
+  protected async trackDownload<T>(
+    work: () => Promise<T>,
+    { indicate = true }: { indicate?: boolean } = {},
+  ): Promise<T> {
     this.beginDownload();
+    if (indicate) {
+      this.raiseIndicator();
+    }
     try {
       return await work();
     } finally {
       this.endDownload();
+      if (indicate) {
+        this.lowerIndicator();
+      }
+    }
+  }
+
+  // Raise the indicator for the duration of `work` without counting it as download work, so it never
+  // holds back the drain or whenIdle. For a caller connecting this store (signing in, fetching a
+  // token), so the connect and the download that follows read as one window rather than two.
+  public async holdDownloadingWhile<T>(work: () => Promise<T>): Promise<T> {
+    this.raiseIndicator();
+    try {
+      return await work();
+    } finally {
+      this.lowerIndicator();
     }
   }
 
   private beginDownload() {
     if (this.downloadCount++ === 0) {
       this.downloadsSettled = new Promise<void>((resolve) => (this.settleDownloads = resolve));
-      this.downloadingSubject.next(true);
     }
   }
 
+  // Settled download work is a drain trigger. It covers the private cloud finishing initializing too:
+  // privateCloudInitialized flips inside the setup's trackDownload.
   private endDownload() {
     if (this.downloadCount > 0 && --this.downloadCount === 0) {
       this.downloadsSettled = null;
       this.settleDownloads();
+      this.drainInBackground();
+    }
+  }
+
+  private raiseIndicator() {
+    if (this.indicatorCount++ === 0) {
+      this.downloadingSubject.next(true);
+    }
+  }
+
+  private lowerIndicator() {
+    if (this.indicatorCount > 0 && --this.indicatorCount === 0) {
       this.downloadingSubject.next(false);
     }
   }
@@ -336,9 +374,6 @@ export abstract class CloudStore {
         }
       }),
     );
-    // Also fires when the private cloud finishes initializing: privateCloudInitialized flips inside
-    // trackDownload, so the indicator's return to false follows it.
-    this.subscriptions.add(this.downloading$.subscribe(() => this.drainInBackground()));
   }
 
   // Fire-and-forget with its own catch: an unhandled rejection here (a drain racing a disposed

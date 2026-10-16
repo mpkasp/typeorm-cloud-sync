@@ -4,7 +4,14 @@ import { getDocs, limit, onSnapshot, query, runTransaction, where } from 'fireba
 import { SqliteStore } from '../../../sqlite-store';
 import { StoreChangeLog } from '../../../models/store-change-log.model';
 import { Meta } from '../../../models/meta.model';
-import { changeLogs, createTestDataSource, Note, silenceLibraryLogs, Tag, User } from '../../../__tests__/fake-entities';
+import {
+  changeLogs,
+  createTestDataSource,
+  Note,
+  silenceLibraryLogs,
+  Tag,
+  User,
+} from '../../../__tests__/fake-entities';
 import { CloudFirebaseFirestore } from '../cloud-firebase-firestore';
 
 // The modular web SDK stands in for a real backend so the subscription bookkeeping around
@@ -56,6 +63,17 @@ const tagDoc = (id: string, changeId: number) => ({
   isDeleted: false,
   isPrivate: false,
 });
+
+// Uploads `tag` through the real writer over a transaction that finds no cloud copy and no Meta doc,
+// so the store remembers the changeId it wrote. Returns that changeId.
+async function uploadTag(tag: Tag): Promise<number> {
+  const absent = { exists: () => false, data: () => undefined };
+  (runTransaction as jest.Mock).mockImplementationOnce((_db: any, update: (transaction: any) => Promise<any>) =>
+    update({ get: async () => absent, set: () => undefined, update: () => undefined }),
+  );
+  await cloud.updateStoreRecord(tag);
+  return tag.changeId;
+}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000) {
   const deadline = Date.now() + timeoutMs;
@@ -253,6 +271,43 @@ describe('subscribeObj live deliveries', () => {
 
     expect(cloud.downloading).toBe(false);
     expect(await dataSource.getRepository(Tag).count()).toBe(0);
+  });
+
+  test('applies a delivery of only its own upload without raising the indicator', async () => {
+    const changeId = await uploadTag(new Tag({ id: 'tag-1', label: 'mine', isPrivate: false }));
+    const seen: boolean[] = [];
+    cloud.downloading$.subscribe((value) => seen.push(value));
+
+    listeners[0](snapshotOf([tagDoc('tag-1', changeId)]));
+    await waitFor(() => !cloud.downloading);
+
+    expect(await dataSource.getRepository(Tag).findOneBy({ id: 'tag-1' })).not.toBeNull();
+    expect(seen).toEqual([false]);
+  });
+
+  test("raises the indicator for a delivery that mixes its own upload with another writer's change", async () => {
+    const changeId = await uploadTag(new Tag({ id: 'tag-1', label: 'mine', isPrivate: false }));
+    const seen: boolean[] = [];
+    cloud.downloading$.subscribe((value) => seen.push(value));
+
+    listeners[0](snapshotOf([tagDoc('tag-1', changeId), tagDoc('tag-2', changeId + 1)]));
+    await waitFor(() => !cloud.downloading);
+
+    expect(seen).toEqual([false, true, false]);
+  });
+
+  test('a written version is recognised once: delivered again, it raises the indicator', async () => {
+    const changeId = await uploadTag(new Tag({ id: 'tag-1', label: 'mine', isPrivate: false }));
+    const seen: boolean[] = [];
+    cloud.downloading$.subscribe((value) => seen.push(value));
+
+    listeners[0](snapshotOf([tagDoc('tag-1', changeId)]));
+    await waitFor(() => !cloud.downloading);
+    expect(seen).toEqual([false]);
+
+    listeners[0](snapshotOf([tagDoc('tag-1', changeId)]));
+    await waitFor(() => !cloud.downloading);
+    expect(seen).toEqual([false, true, false]);
   });
 
   // A delivery that throws must not pin the indicator on: `downloading` gates updateCloudFromChangeLog,

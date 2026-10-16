@@ -280,7 +280,7 @@ Subscribe to `applied$` instead (see Reactive state).
 | ---------------- | ----------------------------------------------------------------- |
 | `network$`       | Online/offline state (defaults to browser `online`/`offline`).    |
 | `user$`          | The current local `BaseUser`, or `null` when signed out.          |
-| `downloading$`   | `true` while a cloud download/backfill is in flight.              |
+| `downloading$`   | The download indicator: `true` while a cloud download/backfill is being written locally, except a delivery that only echoes this store's own uploads. Wrap work done to connect the store (signing in, fetching a token) in `holdDownloadingWhile(work)` to hold it up for that too, so the connect and the download read as one window. The `downloading` getter reports download work instead (echoes included, holds not); it is what holds back uploads. |
 | `applied$`       | `{ recordType, count }` after cloud-origin rows were written locally (a re-delivery that changed nothing does not emit). |
 | `pending$`       | Number of change-log rows not yet uploaded; recounted on commit, drain and apply. Call `refreshPending()` after deleting rows yourself. |
 | `lastError$`     | The most recent failed upload or private-cloud subscribe (`UploadTimeoutError`, a Firestore error), `null` once one succeeds. |

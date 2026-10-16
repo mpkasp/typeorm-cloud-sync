@@ -128,6 +128,42 @@ test('coming back online drains the change log', async () => {
   await expect(changeLogCount()).resolves.toBe(0);
 });
 
+// I5 — "download settled" is download work settling, whether or not it raised downloading$: a delivery
+// that only echoes this store's own upload keeps the indicator down but still blocks the drain.
+test('download work applied without the indicator triggers the drain when it settles', async () => {
+  await drainSettled();
+  const seen: boolean[] = [];
+  cloud.downloading$.subscribe((value) => seen.push(value));
+  let release: () => void = () => undefined;
+  const echo = (cloud as any).trackDownload(() => new Promise<void>((resolve) => (release = resolve)), {
+    indicate: false,
+  });
+  await new Note({ text: 'edited during an echo' }).saveWithManager(dataSource.manager);
+  await drainSettled();
+  await expect(changeLogCount()).resolves.toBe(1);
+
+  release();
+  await echo;
+
+  await waitFor(async () => (await changeLogCount()) === 0, 1000).catch(() => undefined);
+  await expect(changeLogCount()).resolves.toBe(0);
+  expect(seen).toEqual([false]);
+});
+
+// I6 — downloading$ is only an indicator: a caller's hold on it does not hold back the drain.
+test('holding the indicator does not block the drain', async () => {
+  await drainSettled();
+  let release: () => void = () => undefined;
+  const held = cloud.holdDownloadingWhile(() => new Promise<void>((resolve) => (release = resolve)));
+
+  await new Note({ text: 'edited while connecting' }).saveWithManager(dataSource.manager);
+  await waitFor(async () => (await changeLogCount()) === 0, 1000).catch(() => undefined);
+
+  await expect(changeLogCount()).resolves.toBe(0);
+  release();
+  await held;
+});
+
 // I1 — the download conflict path deletes change-log rows without checking their version, so a local
 // edit that lands while a newer cloud copy is being applied loses its queued row. (found in T3)
 // The edit is not awaited before the apply is released: a local save waits for the apply to finish.

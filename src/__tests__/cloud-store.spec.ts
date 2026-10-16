@@ -26,9 +26,10 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, timeoutMs = 
   throw new Error('timed out waiting for condition');
 }
 
-// trackDownload is protected: it is the seam the cloud adapters use to hold the downloading
-// indicator up, so the tests drive the indicator the same way a real delivery does.
-const trackDownload = <T>(work: () => Promise<T>): Promise<T> => (cloud as any).trackDownload(work);
+// trackDownload is protected: it is the seam the cloud adapters use to count download work and hold
+// the downloading indicator up, so the tests drive both the same way a real delivery does.
+const trackDownload = <T>(work: () => Promise<T>, options?: { indicate?: boolean }): Promise<T> =>
+  (cloud as any).trackDownload(work, options);
 
 const deferred = () => {
   let resolve: () => void = () => undefined;
@@ -801,8 +802,8 @@ describe('with the ActiveRecord global bound to another database', () => {
   });
 });
 
-// The indicator is a refcount, not a flag. Setup and every live delivery can hold it at once, so a
-// download that finishes must not report "done" on behalf of the ones still writing.
+// The indicator is a refcount, not a flag. Setup, every live delivery and a caller's connect can hold
+// it at once, so a download that finishes must not report "done" on behalf of the ones still writing.
 describe('downloading indicator', () => {
   test('rises and settles exactly once over a warm start', async () => {
     await seedUser();
@@ -878,5 +879,84 @@ describe('downloading indicator', () => {
     await applied;
 
     await waitFor(async () => (await changeLogCount()) === 0);
+  });
+
+  test('download work that never raised the indicator still releases the cloud push it was blocking', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    await waitFor(async () => (await changeLogCount()) === 0);
+    const seen = recordDownloading();
+
+    const download = deferred();
+    const applied = trackDownload(() => download.promise, { indicate: false });
+    await stageOffline(() => new Note({ text: 'queued behind an echo' }).save());
+    await cloud.updateCloudFromChangeLog();
+    expect(await changeLogCount()).toBeGreaterThan(0);
+
+    download.resolve();
+    await applied;
+
+    await waitFor(async () => (await changeLogCount()) === 0);
+    expect(seen).toEqual([false]);
+  });
+
+  test('download work without the indicator counts as downloading but leaves downloading$ down', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    const seen = recordDownloading();
+
+    const download = deferred();
+    const applied = trackDownload(() => download.promise, { indicate: false });
+    expect(cloud.downloading).toBe(true);
+
+    download.resolve();
+    await applied;
+
+    expect(cloud.downloading).toBe(false);
+    expect(seen).toEqual([false]);
+  });
+
+  test('a hold raises downloading$ without counting as download work', async () => {
+    await seedUser();
+    await cloud.initialize(sqliteStore);
+    const warn = jest.spyOn(console, 'warn');
+    const seen = recordDownloading();
+
+    const connect = deferred();
+    const held = cloud.holdDownloadingWhile(() => connect.promise);
+    expect(seen).toEqual([false, true]);
+    expect(cloud.downloading).toBe(false);
+
+    await cloud.whenIdle(200);
+    expect(warn).not.toHaveBeenCalledWith('[CloudStore] timed out waiting for sync work to finish');
+
+    connect.resolve();
+    await held;
+    expect(seen).toEqual([false, true, false]);
+  });
+
+  test('a hold around connecting reads as one window with the download that follows', async () => {
+    await seedUser();
+    const seen = recordDownloading();
+
+    const token = deferred();
+    const connected = cloud.holdDownloadingWhile(async () => {
+      await token.promise;
+      await cloud.initialize(sqliteStore);
+    });
+    token.resolve();
+    await connected;
+
+    expect(seen).toEqual([false, true, false]);
+  });
+
+  test('a hold whose work fails releases the indicator', async () => {
+    const seen = recordDownloading();
+
+    await expect(cloud.holdDownloadingWhile(() => Promise.reject(new Error('token mint failed')))).rejects.toThrow(
+      'token mint failed',
+    );
+
+    expect(seen).toEqual([false, true, false]);
   });
 });
