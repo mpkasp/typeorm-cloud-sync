@@ -43,6 +43,8 @@ Every change must preserve these. When a change touches one, add or update a tes
    An edit that lands mid-upload must stay queued.
 2. **Cloud-origin writes never invent data.** Timestamps travel with the record; entity listeners are
    off for cloud-origin saves; a document whose `changeId` is not above the local row's is a no-op.
+   A document older (`updatedMs`) than the local row never overwrites it, pending change or not; the
+   local row is re-queued instead.
 3. **The download cursor is per collection, persisted, and advanced only by cloud deliveries.**
    Never derived from local rows, never moved by an upload.
 4. **Listeners are never torn down in order to upload.** Own echoes are harmless under (2).
