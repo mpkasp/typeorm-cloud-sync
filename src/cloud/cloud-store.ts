@@ -735,10 +735,13 @@ export abstract class CloudStore {
   }
 
   // Apply a page of records from the cloud. Records with a pending local change go through the
-  // per-record conflict path; the rest have no local edit to protect, so the cloud copy simply wins
-  // and they are written in a single chunked, transactional bulk save instead of one round-trip each.
-  // On an initial login the change log is empty, so the whole page takes the bulk path — the
-  // difference between ~2 writes and ~1000 read/write round-trips for a 500-record page.
+  // per-record conflict path; the rest are written in a single chunked, transactional bulk save instead
+  // of one round-trip each. On an initial login there are no local rows and the change log is empty,
+  // so the whole page takes the bulk path — the difference between ~2 writes and ~1000 read/write
+  // round-trips for a 500-record page.
+  // A clean record still loses to a local row with a later updatedMs: a server-written partial copy
+  // (stored with updatedMs 0) must not null out the fields of the full record this device already
+  // uploaded. The local row is re-queued instead, so the cloud converges on it.
   protected async resolveRecords(recordType: typeof StoreRecord, objs: StoreRecord[]) {
     if (objs.length === 0) {
       return [];
@@ -753,17 +756,25 @@ export abstract class CloudStore {
     // Drop anything the local row already has: a re-delivered document (a listener reopened
     // over records already stored) or a stale page. Comparing against the current changeId rather than
     // relying on the cloud to only ever send new data keeps re-delivery a true no-op.
-    const localChangeIds = await this.localChangeIds(recordType, objs);
+    const localVersions = await this.localVersions(recordType, objs);
     const incoming = objs.filter((obj) => {
-      const localChangeId = obj.id ? localChangeIds.get(obj.id) : undefined;
-      return localChangeId == null || obj.changeId > localChangeId;
+      const localVersion = obj.id ? localVersions.get(obj.id) : undefined;
+      return localVersion == null || obj.changeId > localVersion.changeId;
     });
 
     const pendingIds = await this.pendingChangeIds(incoming);
     const clean: StoreRecord[] = [];
     const conflicted: StoreRecord[] = [];
+    const outdated: StoreRecord[] = [];
     for (const obj of incoming) {
-      (pendingIds.has(obj.id as string) ? conflicted : clean).push(obj);
+      const localUpdatedMs = localVersions.get(obj.id as string)?.updatedMs ?? 0;
+      if (pendingIds.has(obj.id as string)) {
+        conflicted.push(obj);
+      } else if (localUpdatedMs > (obj.updated?.getTime() ?? 0)) {
+        outdated.push(obj);
+      } else {
+        clean.push(obj);
+      }
     }
 
     const resolvedRecords: StoreRecord[] = [];
@@ -774,6 +785,11 @@ export abstract class CloudStore {
       const saved = await this.manager.save(clean, { chunk: 500, listeners: false });
       resolvedRecords.push(...(saved as unknown as StoreRecord[]));
     }
+    // The local row is unchanged, so these are not announced on applied$; the delivery still counts as
+    // stored, since the device holds a newer copy and has queued it for upload.
+    for (const obj of outdated) {
+      await obj.updateChangeLogWithManager(this.manager);
+    }
     for (const obj of conflicted) {
       const resolvedRecord = await this.resolveRecord(recordType, obj);
       if (resolvedRecord !== null) {
@@ -783,17 +799,23 @@ export abstract class CloudStore {
     return resolvedRecords;
   }
 
-  // One query for the whole page's current local changeIds, so a re-delivered or stale document can
-  // be dropped before it reaches the conflict split.
-  private async localChangeIds(recordType: typeof StoreRecord, objs: StoreRecord[]): Promise<Map<string, number>> {
+  // One query for the whole page's current local changeIds and updatedMs, so a re-delivered, stale or
+  // older-than-local document can be told apart before it reaches the bulk save.
+  private async localVersions(
+    recordType: typeof StoreRecord,
+    objs: StoreRecord[],
+  ): Promise<Map<string, { changeId: number; updatedMs: number }>> {
     const ids = objs.map((obj) => obj.id).filter((id): id is string => id != null);
     if (ids.length === 0) {
       return new Map();
     }
-    const rows = await this.manager
-      .getRepository(recordType)
-      .find({ where: { id: In(ids) } as any, select: { id: true, changeId: true } as any });
-    return new Map(rows.map((row) => [row.id as string, row.changeId]));
+    const rows = await this.manager.getRepository(recordType).find({
+      where: { id: In(ids) } as any,
+      select: { id: true, changeId: true, updatedMs: true } as any,
+    });
+    return new Map(
+      rows.map((row) => [row.id as string, { changeId: row.changeId, updatedMs: row.updated?.getTime() ?? 0 }]),
+    );
   }
 
   // One query for the whole page's pending change-log rows, replacing the per-record findOne that

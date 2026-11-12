@@ -116,6 +116,29 @@ test('re-delivery of an unchanged document does not rewrite the local row', asyn
   expect(second.updatedMs).toBe(first.updatedMs);
 });
 
+// I2 — a cloud copy older than the local row does not overwrite it, even with nothing pending: a
+// server-written partial record must not null out fields of the full record this device uploaded. The
+// local row is re-queued so the cloud converges on it.
+test('an older partial cloud copy of an uploaded record leaves the local row whole and re-uploads it', async () => {
+  const note = await new Note({ text: 'full' }).saveWithManager(dataSource.manager);
+  await waitFor(async () => (await changeLogCount()) === 0);
+  await drainSettled();
+  const uploaded = (await dataSource.getRepository(Note).findOneBy({ id: note.id })) as any;
+
+  const partial = new Note({ id: note.id, changeId: uploaded.changeId + 1 });
+  (partial as any).createdMs = uploaded.createdMs;
+  (partial as any).updatedMs = 0;
+  await (cloud as any).resolveRecords(Note, [partial]);
+
+  const local = (await dataSource.getRepository(Note).findOneBy({ id: note.id })) as any;
+  expect(local.text).toBe('full');
+  expect(local.updatedMs).toBe(uploaded.updatedMs);
+  await waitFor(async () => (await changeLogCount()) === 0);
+  await drainSettled();
+  const cloudDoc = await cloud.port.getDoc(`User/${AUTH_ID}/Note/${note.id}`);
+  expect(cloudDoc.data?.text).toBe('full');
+});
+
 // I5 — the drain has a fixed trigger set, and network recovery is one of them. (F4)
 test('coming back online drains the change log', async () => {
   network.next(false);

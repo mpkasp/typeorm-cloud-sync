@@ -462,6 +462,53 @@ describe('resolveRecord', () => {
     await expect(changeLogCount()).resolves.toBe(0);
   });
 
+  test('resolveRecords keeps a clean local row that is newer than the incoming copy and re-queues it', async () => {
+    network.next(false);
+    await dataSource.manager.save(new Note({ id: 'a', text: 'full', changeId: 3, createdMs: 1000, updatedMs: 5000 }), {
+      listeners: false,
+    });
+    const resolve = jest.spyOn(sqliteStore, 'resolve');
+    // A server-written partial copy: no text, and deserialize stores its missing updatedMs as 0.
+    const partial = new Note({ id: 'a', changeId: 4, createdMs: 1000, updatedMs: 0 });
+
+    const resolved = await (cloud as any).resolveRecords(Note, [partial]);
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(resolved).toHaveLength(0);
+    const local = (await dataSource.getRepository(Note).findOneBy({ id: 'a' })) as any;
+    expect(local.text).toBe('full');
+    expect(local.updatedMs).toBe(5000);
+    await expect(changeLogCount()).resolves.toBe(1);
+  });
+
+  test('resolveRecords applies a clean incoming copy that is newer than the local row', async () => {
+    await dataSource.manager.save(new Note({ id: 'a', text: 'old', changeId: 3, createdMs: 1000, updatedMs: 5000 }), {
+      listeners: false,
+    });
+    const incoming = new Note({ id: 'a', text: 'new', changeId: 4, createdMs: 1000, updatedMs: 6000 });
+
+    const resolved = await (cloud as any).resolveRecords(Note, [incoming]);
+
+    expect(resolved).toHaveLength(1);
+    const local = (await dataSource.getRepository(Note).findOneBy({ id: 'a' })) as any;
+    expect(local.text).toBe('new');
+    expect(local.updatedMs).toBe(6000);
+    await expect(changeLogCount()).resolves.toBe(0);
+  });
+
+  test('resolveRecords applies a clean incoming copy whose updatedMs equals the local row', async () => {
+    await dataSource.manager.save(new Note({ id: 'a', text: 'old', changeId: 3, createdMs: 1000, updatedMs: 5000 }), {
+      listeners: false,
+    });
+    const incoming = new Note({ id: 'a', text: 'same time', changeId: 4, createdMs: 1000, updatedMs: 5000 });
+
+    const resolved = await (cloud as any).resolveRecords(Note, [incoming]);
+
+    expect(resolved).toHaveLength(1);
+    await expect(dataSource.getRepository(Note).findOneBy({ id: 'a' })).resolves.toMatchObject({ text: 'same time' });
+    await expect(changeLogCount()).resolves.toBe(0);
+  });
+
   // Parallel per-collection catch-up (subscribePrivateCloud/subscribePublicCloud) can call resolveRecords
   // concurrently, but the local database is a single writer — so the resolves must not overlap.
   test('serializes concurrent resolves so the single-writer database is never entered twice at once', async () => {

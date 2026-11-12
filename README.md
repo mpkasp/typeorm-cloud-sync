@@ -80,9 +80,10 @@ flowchart LR
    device wrote below a locally uploaded `changeId` still arrives. A document whose `changeId` is not
    above the local row's is dropped before it is written. Records with a pending
    local change are merged by `SqliteStore.resolve` using last-write-wins on the record's `updated`
-   timestamp; the rest — the whole page on an initial login — have no local edit to protect and are
-   written to SQLite in a single chunked bulk save, so a large first download is a handful of writes
-   rather than one round-trip per record.
+   timestamp; the rest — the whole page on an initial login — are written to SQLite in a single
+   chunked bulk save, so a large first download is a handful of writes rather than one round-trip per
+   record. A record with no pending change whose local row has a later `updated` is not written: the
+   local row is queued to upload again, so a partial server-written copy cannot erase its fields.
 
 The library never blocks a local commit on the network. The change log is the source of truth for
 "what still needs to go up," so a dropped connection or a crash only changes *when* the cloud catches
@@ -264,6 +265,9 @@ When a cloud record arrives, `SqliteStore.resolve` decides the winner:
   edit that landed since keeps its row and the cloud copy is discarded. If local is newer, local is
   kept and its row's version bumped so it uploads again.
 - Equal timestamps → no-op.
+
+A record with no pending change follows the same rule against its local row: when the local row is
+newer, it is kept and queued to upload again; otherwise the cloud copy is saved.
 
 The upload side applies the same rule: the writer skips a record whose cloud copy has a newer
 `updatedMs`, and the drain stores that copy locally in place of the change it did not upload.
